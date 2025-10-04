@@ -10,7 +10,7 @@ from utils.proxy_manager import ProxyManager
 import logging
 import time
 import xml.etree.ElementTree as ET
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, quote
 
 try:
     import feedparser
@@ -96,19 +96,19 @@ class NewsCollector:
             logger.warning("No free proxies available")
         return self.current_proxy
     
-    def _request_with_retry(self, url, max_retries=3):
+    def _request_with_retry(self, url, max_retries=3, timeout=15, use_proxy=True):
         """Make HTTP request with retry and proxy rotation"""
         last_exception = None
         
         for attempt in range(max_retries):
             try:
-                proxy = self._get_proxy()
+                proxy = self._get_proxy() if use_proxy else None
                 
                 response = requests.get(
                     url, 
                     headers=self.headers, 
                     proxies=proxy, 
-                    timeout=15,
+                    timeout=timeout,
                     allow_redirects=True
                 )
                 response.raise_for_status()
@@ -143,16 +143,27 @@ class NewsCollector:
         if any(exclude in text_lower for exclude in exclude_patterns):
             return False
         
-        # Ключевые паттерны
+        # Расширенные ключевые паттерны (более гибкие)
         main_patterns = [
             'тнс энерго нн',
             'тнс энерго нижний',
             'тнс энерго нижегородск',
             'тнс нн',
-            'тнс нижний новгород'
+            'тнс нижний новгород',
+            # Добавляем более общие паттерны
+            'тнс энерго',  # Может быть с упоминанием НН рядом
+            'энергосбыт нижний',
+            'энергосбыт нн',
         ]
         
-        return any(pattern in text_lower for pattern in main_patterns)
+        # Проверяем основные паттерны
+        has_main_pattern = any(pattern in text_lower for pattern in main_patterns)
+        
+        # Или проверяем комбинацию: ТНС/энергосбыт + Нижний/НН/Нижегородск
+        has_company = any(word in text_lower for word in ['тнс', 'энергосбыт'])
+        has_region = any(word in text_lower for word in ['нижний новгород', 'нижегородск', ' нн ', 'нн,', 'нн.'])
+        
+        return has_main_pattern or (has_company and has_region)
     
     def _is_russian(self, text):
         """Check if text is in Russian"""
@@ -254,7 +265,9 @@ class NewsCollector:
         articles = []
         
         try:
-            search_url = f"https://news.google.com/rss/search?q={query}+Нижний+Новгород&hl=ru&gl=RU&ceid=RU:ru"
+            # Правильно кодируем URL, используя quote для параметра запроса
+            encoded_query = quote(f"{query} Нижний Новгород")
+            search_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ru&gl=RU&ceid=RU:ru"
             
             logger.info(f"Searching Google News: {query}")
             
@@ -324,12 +337,14 @@ class NewsCollector:
         articles = []
         
         try:
-            # Yandex News RSS (бесплатный)
-            search_url = f"https://news.yandex.ru/yandsearch?cl4url=&lang=ru&lr=47&rpt=nnews2&text={query}"
+            # Yandex News RSS (бесплатный) - кодируем запрос
+            encoded_query = quote(query)
+            search_url = f"https://news.yandex.ru/yandsearch?cl4url=&lang=ru&lr=47&rpt=nnews2&text={encoded_query}"
             
             logger.info(f"Searching Yandex News: {query}")
             
-            response = self._request_with_retry(search_url)
+            # Увеличенный таймаут и без прокси для Яндекса (они блокируют публичные прокси)
+            response = self._request_with_retry(search_url, timeout=30, use_proxy=False)
             soup = BeautifulSoup(response.text, 'html.parser')
             
             # Парсим результаты Yandex News
@@ -385,13 +400,13 @@ class NewsCollector:
         for query in self.search_queries:
             articles = self.search_google_news(query)
             all_articles.extend(articles)
-            time.sleep(3)
+            time.sleep(3)  # Задержка между запросами
         
         # 3. Yandex News
         for query in self.search_queries:
             articles = self.search_yandex_news_rss(query)
             all_articles.extend(articles)
-            time.sleep(3)
+            time.sleep(5)  # Увеличенная задержка для Яндекса
         
         logger.info(f"Total articles collected: {len(all_articles)}")
         return all_articles
