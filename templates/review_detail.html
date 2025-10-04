@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}Отзыв #{{ review.id }} - ТНС энерго НН{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom: 2rem;">Детали отзыва #{{ review.id }}</h2>
+
+<div class="card">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+        <div>
+            <h3 style="margin-bottom: 1rem;">Информация об отзыве</h3>
+            <p><strong>Источник:</strong> {{ review.source.upper() }}</p>
+            <p><strong>Автор:</strong> {{ review.author or 'Неизвестно' }}</p>
+            <p><strong>Дата публикации:</strong> {{ review.published_date.strftime('%d.%m.%Y %H:%M') if review.published_date else '-' }}</p>
+            <p><strong>Дата сбора:</strong> {{ review.collected_date.strftime('%d.%m.%Y %H:%M') if review.collected_date else '-' }}</p>
+            {% if review.url %}
+            <p><strong>Ссылка:</strong> <a href="{{ review.url }}" target="_blank" style="color: #1e3c72;">Открыть оригинал</a></p>
+            {% endif %}
+        </div>
+        
+        <div>
+            <h3 style="margin-bottom: 1rem;">Анализ</h3>
+            <p>
+                <strong>Тональность:</strong> 
+                {% if review.sentiment_label == 'positive' %}
+                    <span class="badge badge-positive">Позитивный</span>
+                {% elif review.sentiment_label == 'negative' %}
+                    <span class="badge badge-negative">Негативный</span>
+                {% else %}
+                    <span class="badge badge-neutral">Нейтральный</span>
+                {% endif %}
+            </p>
+            <p><strong>Оценка:</strong> {{ "%.2f"|format(review.sentiment_score) if review.sentiment_score else 'Не определена' }}</p>
+            {% if review.keywords %}
+            <p><strong>Ключевые слова:</strong> {{ review.keywords }}</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <h3 style="margin-bottom: 1rem;">Текст отзыва</h3>
+    <div style="background: #f8f9fa; padding: 1.5rem; border-radius: 5px; line-height: 1.8;">
+        {{ review.text }}
+    </div>
+</div>
+
+<div class="card">
+    <h3 style="margin-bottom: 1rem;">Модерация</h3>
+    <p>
+        <strong>Статус:</strong> 
+        {% if review.requires_manual_review %}
+            <span class="badge badge-pending">Требует проверки</span>
+        {% elif review.moderation_status == 'approved' %}
+            <span class="badge badge-approved">Одобрен</span>
+        {% elif review.moderation_status == 'rejected' %}
+            <span class="badge badge-rejected">Отклонен</span>
+        {% else %}
+            <span class="badge badge-neutral">Новый</span>
+        {% endif %}
+    </p>
+    
+    {% if review.moderation_reason %}
+    <p><strong>Причина:</strong> {{ review.moderation_reason }}</p>
+    {% endif %}
+    
+    {% if review.requires_manual_review or not review.processed %}
+    <div style="margin-top: 1rem; display: flex; gap: 1rem;">
+        <button onclick="moderateReview({{ review.id }}, 'approve')" class="btn btn-success">✓ Одобрить</button>
+        <button onclick="moderateReview({{ review.id }}, 'reject')" class="btn btn-danger">✗ Отклонить</button>
+    </div>
+    {% endif %}
+</div>
+
+<div style="margin-top: 2rem;">
+    <a href="{{ url_for('reviews_list') }}" class="btn btn-primary">← Вернуться к списку</a>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function moderateReview(reviewId, action) {
+    if (!confirm('Вы уверены?')) return;
+    
+    let reason = null;
+    if (action === 'reject') {
+        reason = prompt('Укажите причину отклонения:');
+        if (!reason) return;
+    }
+    
+    fetch(`/api/review/${reviewId}/moderate`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ action: action, reason: reason })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Отзыв успешно обработан');
+            location.reload();
+        }
+    })
+    .catch(error => {
+        alert('Ошибка при обработке отзыва');
+        console.error(error);
+    });
+}
+</script>
+{% endblock %}

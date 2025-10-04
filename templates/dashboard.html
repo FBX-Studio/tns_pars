@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Дашборд - ТНС энерго НН{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom: 2rem;">📊 Статистика отзывов</h2>
+
+<div class="stats">
+    <div class="stat-card">
+        <h3>Всего отзывов</h3>
+        <div class="value">{{ stats.total }}</div>
+    </div>
+    <div class="stat-card">
+        <h3>На модерации</h3>
+        <div class="value" style="color: #ffc107;">{{ stats.pending }}</div>
+    </div>
+    <div class="stat-card">
+        <h3>Позитивные</h3>
+        <div class="value" style="color: #28a745;">{{ stats.positive }}</div>
+    </div>
+    <div class="stat-card">
+        <h3>Негативные</h3>
+        <div class="value" style="color: #dc3545;">{{ stats.negative }}</div>
+    </div>
+    <div class="stat-card">
+        <h3>Нейтральные</h3>
+        <div class="value" style="color: #6c757d;">{{ stats.neutral }}</div>
+    </div>
+</div>
+
+<div class="card">
+    <h3 style="margin-bottom: 1rem;">Последние отзывы</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Дата</th>
+                <th>Источник</th>
+                <th>Автор</th>
+                <th>Отзыв</th>
+                <th>Тональность</th>
+                <th>Статус</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for review in reviews %}
+            <tr>
+                <td>{{ review.collected_date.strftime('%d.%m.%Y %H:%M') if review.collected_date else '-' }}</td>
+                <td><strong>{{ review.source.upper() }}</strong></td>
+                <td>{{ review.author or 'Неизвестно' }}</td>
+                <td>
+                    <a href="{{ url_for('review_detail', review_id=review.id) }}" style="color: #1e3c72; text-decoration: none;">
+                        {{ review.text[:100] }}{% if review.text|length > 100 %}...{% endif %}
+                    </a>
+                </td>
+                <td>
+                    {% if review.sentiment_label == 'positive' %}
+                        <span class="badge badge-positive">Позитивный</span>
+                    {% elif review.sentiment_label == 'negative' %}
+                        <span class="badge badge-negative">Негативный</span>
+                    {% else %}
+                        <span class="badge badge-neutral">Нейтральный</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if review.requires_manual_review %}
+                        <span class="badge badge-pending">На проверке</span>
+                    {% elif review.moderation_status == 'approved' %}
+                        <span class="badge badge-approved">Одобрен</span>
+                    {% elif review.moderation_status == 'rejected' %}
+                        <span class="badge badge-rejected">Отклонен</span>
+                    {% else %}
+                        <span class="badge badge-neutral">Новый</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    
+    <div style="margin-top: 1rem; text-align: center;">
+        <a href="{{ url_for('reviews_list') }}" class="btn btn-primary">Посмотреть все отзывы</a>
+    </div>
+</div>
+{% endblock %}
