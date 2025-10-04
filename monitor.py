@@ -12,6 +12,8 @@ try:
     from collectors.news_collector import NewsCollector
 except ImportError:
     from collectors.web_collector import WebCollector as NewsCollector
+from collectors.zen_collector import ZenCollector
+from collectors.ok_collector import OKCollector
 from analyzers.sentiment_analyzer import SentimentAnalyzer
 from analyzers.moderator import Moderator
 from config import Config
@@ -28,6 +30,8 @@ class ReviewMonitor:
         self.vk_collector = VKCollector()
         self.telegram_collector = TelegramCollector()
         self.news_collector = NewsCollector()
+        self.zen_collector = ZenCollector()
+        self.ok_collector = OKCollector()
         self.sentiment_analyzer = SentimentAnalyzer()
         self.moderator = Moderator()
     
@@ -115,6 +119,12 @@ class ReviewMonitor:
         time.sleep(2)
         
         self.collect_from_source('news', self.news_collector)
+        time.sleep(2)
+        
+        self.collect_from_source('zen', self.zen_collector)
+        time.sleep(2)
+        
+        self.collect_from_source('ok', self.ok_collector)
         
         logger.info("Monitoring cycle completed")
     
