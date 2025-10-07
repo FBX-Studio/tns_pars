@@ -409,6 +409,84 @@ class NewsCollector:
         
         return articles
     
+    def parse_article_comments(self, article_url):
+        """Parse comments from article page"""
+        comments = []
+        
+        try:
+            logger.info(f"Parsing comments from: {article_url}")
+            
+            response = self._request_with_retry(article_url, timeout=15)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Попытка найти комментарии по распространенным паттернам
+            comment_selectors = [
+                {'class': 'comment'},
+                {'class': 'comment-item'},
+                {'class': 'comment-body'},
+                {'class': 'comment-content'},
+                {'class': 'user-comment'},
+                {'id': 'comments'},
+                {'class': 'comments'},
+                {'class': 'comment-list'},
+                {'data-type': 'comment'},
+            ]
+            
+            for selector in comment_selectors:
+                comment_elements = soup.find_all('div', selector) or soup.find_all('li', selector) or soup.find_all('article', selector)
+                
+                if comment_elements:
+                    for elem in comment_elements[:50]:  # Limit to 50 comments per article
+                        try:
+                            # Extract comment text
+                            text_elem = elem.find(['p', 'div'], class_=lambda x: x and ('text' in x.lower() or 'content' in x.lower() or 'body' in x.lower()))
+                            if not text_elem:
+                                text_elem = elem
+                            
+                            comment_text = text_elem.get_text(strip=True)
+                            
+                            if not comment_text or len(comment_text) < 10:
+                                continue
+                            
+                            # Extract author
+                            author_elem = elem.find(['span', 'a', 'div'], class_=lambda x: x and ('author' in x.lower() or 'user' in x.lower() or 'name' in x.lower()))
+                            author = author_elem.get_text(strip=True) if author_elem else 'Anonymous'
+                            
+                            # Extract date
+                            date_elem = elem.find(['time', 'span'], class_=lambda x: x and ('date' in x.lower() or 'time' in x.lower()))
+                            published_date = datetime.now()
+                            if date_elem:
+                                try:
+                                    date_text = date_elem.get('datetime') or date_elem.get_text(strip=True)
+                                    # Simple date parsing - can be improved
+                                    published_date = datetime.now()
+                                except:
+                                    pass
+                            
+                            comment = {
+                                'text': comment_text,
+                                'author': author,
+                                'published_date': published_date,
+                                'source': 'news_comment',
+                                'url': article_url
+                            }
+                            
+                            comments.append(comment)
+                            
+                        except Exception as e:
+                            logger.debug(f"Error parsing individual comment: {e}")
+                            continue
+                    
+                    if comments:
+                        break  # Found comments, no need to try other selectors
+            
+            logger.info(f"Found {len(comments)} comments for article")
+            
+        except Exception as e:
+            logger.warning(f"Error parsing comments from {article_url}: {e}")
+        
+        return comments
+    
     def collect(self):
         """Main collection method (оптимизированный)"""
         all_articles = []
@@ -437,3 +515,38 @@ class NewsCollector:
         
         logger.info(f"Total articles collected: {len(all_articles)}")
         return all_articles
+    
+    def collect_with_comments(self):
+        """Collect articles with comments"""
+        articles = self.collect()
+        all_data = []
+        
+        logger.info(f"Collecting comments for {len(articles)} articles")
+        
+        for article in articles:
+            all_data.append(article)
+            
+            # Parse comments for each article
+            if article.get('url'):
+                comments = self.parse_article_comments(article['url'])
+                
+                # Add article reference to comments
+                for comment in comments:
+                    comment['parent_url'] = article['url']
+                    comment['parent_source_id'] = article['source_id']
+                    comment['source_id'] = f"{article['source_id']}_comment_{hash(comment['text'])}"
+                    comment['is_comment'] = True
+                    
+                    # Анализ тональности для комментария
+                    if self.sentiment_analyzer:
+                        sentiment = self.sentiment_analyzer.analyze(comment['text'])
+                        comment['sentiment_score'] = sentiment['sentiment_score']
+                        comment['sentiment_label'] = sentiment['sentiment_label']
+                
+                all_data.extend(comments)
+                
+                # Small delay between requests
+                time.sleep(0.5)
+        
+        logger.info(f"Total items (articles + comments): {len(all_data)}")
+        return all_data

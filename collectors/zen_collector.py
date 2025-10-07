@@ -85,18 +85,36 @@ class ZenCollector:
     
     def _make_request(self, url, max_retries=3):
         """Выполнение запроса с использованием сессии и обхода блокировки"""
+        from config import Config
+        
+        # Проверяем настройки Tor
+        use_tor = Config.get('USE_TOR', '').lower() == 'true'
+        tor_proxy = Config.get('TOR_PROXY', 'socks5h://127.0.0.1:9150')
+        
         # Добавляем рефферер для имитации перехода с Яндекса
         if 'yandex.ru' in url:
             self.session.headers['Referer'] = 'https://yandex.ru/'
         
+        # Если включен Tor - используем его
+        if use_tor:
+            proxies = {'http': tor_proxy, 'https': tor_proxy}
+            logger.debug(f"[ZEN] Используем Tor: {tor_proxy}")
+        else:
+            proxies = None
+        
         # Сначала пробуем через сессию (сохраняет cookies)
         try:
-            response = self.session.get(url, timeout=20, allow_redirects=True)
+            response = self.session.get(url, timeout=20, allow_redirects=True, proxies=proxies)
             
             # Проверяем не капча ли это
             if 'showcaptcha' in response.url or 'captcha' in response.text.lower():
-                logger.warning("[ZEN] Яндекс показал капчу, пробуем с задержкой")
-                time.sleep(3)
+                logger.warning("[ZEN] Яндекс показал капчу")
+                if use_tor:
+                    logger.info("[ZEN] Пробуем получить новый IP через Tor...")
+                    time.sleep(5)
+                else:
+                    logger.warning("[ZEN] Рекомендуется включить Tor (USE_TOR=True в .env)")
+                    time.sleep(3)
             elif response.status_code == 200:
                 return response
         except Exception as e:
@@ -287,7 +305,67 @@ class ZenCollector:
         
         return articles
     
-    def collect(self):
+    def parse_dzen_comments(self, article_url):
+        """Parse comments from Dzen article"""
+        comments = []
+        
+        try:
+            logger.info(f"[ZEN] Parsing comments from: {article_url}")
+            
+            response = self._make_request(article_url)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Яндекс.Дзен использует React и динамическую загрузку
+            # Комментарии часто загружаются через API или находятся в data-атрибутах
+            
+            # Попытка найти комментарии по селекторам
+            comment_selectors = [
+                {'class': 'comment'},
+                {'class': 'comments-item'},
+                {'data-testid': 'comment'},
+                {'class': 'mg-comment'},
+            ]
+            
+            for selector in comment_selectors:
+                comment_elements = soup.find_all(['div', 'li', 'article'], selector)
+                
+                if comment_elements:
+                    for elem in comment_elements[:30]:  # Limit comments
+                        try:
+                            comment_text = elem.get_text(strip=True)
+                            
+                            if not comment_text or len(comment_text) < 10:
+                                continue
+                            
+                            # Extract author
+                            author_elem = elem.find(['span', 'a', 'div'], class_=lambda x: x and 'author' in x.lower())
+                            author = author_elem.get_text(strip=True) if author_elem else 'Аноним'
+                            
+                            comment = {
+                                'text': comment_text,
+                                'author': author,
+                                'published_date': datetime.now(),
+                                'source': 'zen_comment',
+                                'url': article_url
+                            }
+                            
+                            comments.append(comment)
+                            
+                        except Exception as e:
+                            logger.debug(f"[ZEN] Error parsing comment: {e}")
+                            continue
+                    
+                    if comments:
+                        break
+            
+            logger.info(f"[ZEN] Found {len(comments)} comments")
+            
+        except Exception as e:
+            logger.warning(f"[ZEN] Error parsing comments: {e}")
+        
+        return comments
+    
+    def collect(self, collect_comments=False):
         """Сбор статей из Яндекс.Дзен"""
         all_posts = []
         
@@ -298,10 +376,28 @@ class ZenCollector:
             for keyword in self.keywords[:2]:
                 logger.info(f"[ZEN] Поиск по ключевому слову: {keyword}")
                 posts = self.search_dzen_yandex(keyword)
+                
+                # Collect comments if requested
+                if collect_comments:
+                    for post in posts:
+                        if post.get('url'):
+                            comments = self.parse_dzen_comments(post['url'])
+                            
+                            for comment in comments:
+                                comment['parent_source_id'] = post['source_id']
+                                comment['parent_url'] = post['url']
+                                comment['source_id'] = f"{post['source_id']}_comment_{hash(comment['text'])}"
+                                comment['is_comment'] = True
+                                all_posts.append(comment)
+                            
+                            time.sleep(1)
+                        
+                        post['is_comment'] = False
+                
                 all_posts.extend(posts)
                 time.sleep(2)  # Задержка между запросами
             
-            logger.info(f"[ZEN] Всего найдено релевантных статей: {len(all_posts)}")
+            logger.info(f"[ZEN] Всего найдено релевантных элементов: {len(all_posts)}")
             
         except Exception as e:
             logger.error(f"[ZEN] Ошибка сбора: {e}")

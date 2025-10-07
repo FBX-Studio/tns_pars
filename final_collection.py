@@ -1,5 +1,5 @@
 """
-Финальный сбор данных со всех источников
+Финальный сбор данных со всех источников с комментариями
 """
 import sys
 import os
@@ -12,11 +12,18 @@ from models import db, Review, MonitoringLog
 from collectors.vk_collector import VKCollector
 from collectors.telegram_user_collector import TelegramUserCollector
 from collectors.news_collector import NewsCollector
+from collectors.zen_collector import ZenCollector
+from collectors.zen_selenium_collector import ZenSeleniumCollector
+try:
+    from collectors.ok_api_collector import OKAPICollector
+except ImportError:
+    from collectors.ok_collector import OKCollector as OKAPICollector
 from analyzers.sentiment_analyzer import SentimentAnalyzer
 from analyzers.moderator import Moderator
 from app import app
 from datetime import datetime
 import logging
+import argparse
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,8 +32,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def main():
+    # Parse arguments
+    parser = argparse.ArgumentParser(description='Сбор данных из всех источников')
+    parser.add_argument('--comments', action='store_true', 
+                       help='Включить парсинг комментариев (медленнее)')
+    parser.add_argument('--no-vk', action='store_true', help='Пропустить VK')
+    parser.add_argument('--no-telegram', action='store_true', help='Пропустить Telegram')
+    parser.add_argument('--no-news', action='store_true', help='Пропустить новости')
+    parser.add_argument('--no-zen', action='store_true', help='Пропустить Яндекс.Дзен')
+    parser.add_argument('--no-ok', action='store_true', help='Пропустить Одноклассники')
+    parser.add_argument('--zen-selenium', action='store_true', 
+                       help='Использовать Selenium для Дзена (обход капчи, медленнее)')
+    args = parser.parse_args()
+    
     logger.info("\n" + "=" * 70)
     logger.info("ФИНАЛЬНЫЙ СБОР ДАННЫХ ИЗ ВСЕХ ИСТОЧНИКОВ")
+    if args.comments:
+        logger.info("Режим: С ПАРСИНГОМ КОММЕНТАРИЕВ")
     logger.info("=" * 70)
     
     # Проверка Telegram API
@@ -46,46 +68,105 @@ def main():
     news_collector.use_free_proxies = False
     news_collector.current_proxy = None
     
+    # Выбор коллектора для Дзена
+    if args.zen_selenium:
+        logger.info("🌐 Используется Selenium для Яндекс.Дзен (обход капчи)")
+        zen_collector = ZenSeleniumCollector()
+    else:
+        zen_collector = ZenCollector()
+    
+    ok_collector = OKAPICollector()
+    
     sentiment_analyzer = SentimentAnalyzer()
     moderator = Moderator()
     
     all_reviews = []
     
     # 1. VK
-    logger.info("\n" + "=" * 70)
-    logger.info("1️⃣  СБОР ИЗ VK")
-    logger.info("=" * 70)
-    try:
-        vk_reviews = vk_collector.collect()
-        logger.info(f"✓ VK: найдено {len(vk_reviews)} отзывов")
-        all_reviews.extend(vk_reviews)
-    except Exception as e:
-        logger.error(f"✗ Ошибка VK: {e}")
+    if not args.no_vk:
+        logger.info("\n" + "=" * 70)
+        logger.info("1️⃣  СБОР ИЗ VK")
+        logger.info("=" * 70)
+        try:
+            vk_reviews = vk_collector.collect()
+            logger.info(f"✓ VK: найдено {len(vk_reviews)} отзывов")
+            all_reviews.extend(vk_reviews)
+        except Exception as e:
+            logger.error(f"✗ Ошибка VK: {e}")
     
     # 2. Telegram
-    logger.info("\n" + "=" * 70)
-    logger.info("2️⃣  СБОР ИЗ TELEGRAM")
-    logger.info("=" * 70)
-    logger.info("Каналы: @moynizhny, @bez_cenz_nn, @today_nn, @nizhniy_smi, @nn52signal")
-    try:
-        tg_reviews = telegram_collector.collect()
-        logger.info(f"✓ Telegram: найдено {len(tg_reviews)} сообщений")
-        all_reviews.extend(tg_reviews)
-    except Exception as e:
-        logger.error(f"✗ Ошибка Telegram: {e}")
-        import traceback
-        traceback.print_exc()
+    if not args.no_telegram:
+        logger.info("\n" + "=" * 70)
+        logger.info("2️⃣  СБОР ИЗ TELEGRAM")
+        if args.comments:
+            logger.info("(с комментариями/ответами)")
+        logger.info("=" * 70)
+        logger.info("Каналы: @moynizhny, @bez_cenz_nn, @today_nn, @nizhniy_smi, @nn52signal")
+        try:
+            tg_reviews = telegram_collector.collect(collect_comments=args.comments)
+            messages = [r for r in tg_reviews if not r.get('is_comment', False)]
+            comments = [r for r in tg_reviews if r.get('is_comment', False)]
+            logger.info(f"✓ Telegram: найдено {len(messages)} сообщений")
+            if args.comments:
+                logger.info(f"✓ Telegram: найдено {len(comments)} ответов")
+            all_reviews.extend(tg_reviews)
+        except Exception as e:
+            logger.error(f"✗ Ошибка Telegram: {e}")
+            import traceback
+            traceback.print_exc()
     
     # 3. Новости
-    logger.info("\n" + "=" * 70)
-    logger.info("3️⃣  СБОР НОВОСТЕЙ (Google News)")
-    logger.info("=" * 70)
-    try:
-        news = news_collector.collect()
-        logger.info(f"✓ Новости: найдено {len(news)} статей")
-        all_reviews.extend(news)
-    except Exception as e:
-        logger.error(f"✗ Ошибка новостей: {e}")
+    if not args.no_news:
+        logger.info("\n" + "=" * 70)
+        logger.info("3️⃣  СБОР НОВОСТЕЙ (Google News)")
+        if args.comments:
+            logger.info("(с комментариями)")
+        logger.info("=" * 70)
+        try:
+            if args.comments:
+                news = news_collector.collect_with_comments()
+                articles = [r for r in news if not r.get('is_comment', False)]
+                comments = [r for r in news if r.get('is_comment', False)]
+                logger.info(f"✓ Новости: найдено {len(articles)} статей")
+                logger.info(f"✓ Новости: найдено {len(comments)} комментариев")
+            else:
+                news = news_collector.collect()
+                logger.info(f"✓ Новости: найдено {len(news)} статей")
+            all_reviews.extend(news)
+        except Exception as e:
+            logger.error(f"✗ Ошибка новостей: {e}")
+    
+    # 4. Яндекс.Дзен
+    if not args.no_zen:
+        logger.info("\n" + "=" * 70)
+        logger.info("4️⃣  СБОР ИЗ ЯНДЕКС.ДЗЕН")
+        if args.comments:
+            logger.info("(с комментариями)")
+        logger.info("=" * 70)
+        try:
+            zen = zen_collector.collect(collect_comments=args.comments)
+            articles = [r for r in zen if not r.get('is_comment', False)]
+            comments = [r for r in zen if r.get('is_comment', False)]
+            logger.info(f"✓ Дзен: найдено {len(articles)} статей")
+            if args.comments:
+                logger.info(f"✓ Дзен: найдено {len(comments)} комментариев")
+            all_reviews.extend(zen)
+        except Exception as e:
+            logger.error(f"✗ Ошибка Дзен: {e}")
+    
+    # 5. Одноклассники
+    if not args.no_ok:
+        logger.info("\n" + "=" * 70)
+        logger.info("5️⃣  СБОР ИЗ ОДНОКЛАССНИКОВ")
+        logger.info("=" * 70)
+        try:
+            ok_posts = ok_collector.collect()
+            logger.info(f"✓ Одноклассники: найдено {len(ok_posts)} постов")
+            all_reviews.extend(ok_posts)
+        except Exception as e:
+            logger.error(f"✗ Ошибка Одноклассники: {e}")
+            import traceback
+            traceback.print_exc()
     
     # Сохранение
     logger.info("\n" + "=" * 70)
@@ -94,10 +175,15 @@ def main():
     logger.info(f"Всего собрано: {len(all_reviews)} записей")
     
     saved = 0
+    parent_mapping = {}
+    
     with app.app_context():
         for review_data in all_reviews:
             existing = Review.query.filter_by(source_id=review_data['source_id']).first()
             if existing:
+                # Store mapping for parent-child relationships
+                if not review_data.get('is_comment', False):
+                    parent_mapping[review_data['source_id']] = existing.id
                 continue
             
             sentiment = sentiment_analyzer.analyze(review_data['text'])
@@ -107,6 +193,20 @@ def main():
                 review_data['text'],
                 sentiment['sentiment_score']
             )
+            
+            # Determine parent_id for comments
+            parent_id = None
+            if review_data.get('is_comment', False):
+                parent_source_id = review_data.get('parent_source_id')
+                if parent_source_id:
+                    # Try to find in mapping first
+                    parent_id = parent_mapping.get(parent_source_id)
+                    # If not in mapping, query database
+                    if not parent_id:
+                        parent = Review.query.filter_by(source_id=parent_source_id).first()
+                        if parent:
+                            parent_id = parent.id
+                            parent_mapping[parent_source_id] = parent_id
             
             review = Review(
                 source=review_data['source'],
@@ -122,18 +222,30 @@ def main():
                 moderation_status=moderation_status,
                 moderation_reason=moderation_reason,
                 requires_manual_review=requires_manual,
-                processed=not requires_manual
+                processed=not requires_manual,
+                parent_id=parent_id,
+                is_comment=review_data.get('is_comment', False)
             )
             
             db.session.add(review)
             saved += 1
+            
+            # Store new parent for future children
+            if not review_data.get('is_comment', False):
+                db.session.flush()
+                parent_mapping[review_data['source_id']] = review.id
         
         db.session.commit()
         
         total = Review.query.count()
-        vk_count = Review.query.filter_by(source='vk').count()
-        tg_count = Review.query.filter_by(source='telegram').count()
-        news_count = Review.query.filter(Review.source.in_(['news', 'web'])).count()
+        articles_count = Review.query.filter_by(is_comment=False).count()
+        comments_count = Review.query.filter_by(is_comment=True).count()
+        
+        vk_count = Review.query.filter_by(source='vk', is_comment=False).count()
+        tg_count = Review.query.filter_by(source='telegram', is_comment=False).count()
+        news_count = Review.query.filter(Review.source.in_(['news', 'web']), Review.is_comment==False).count()
+        zen_count = Review.query.filter_by(source='zen', is_comment=False).count()
+        ok_count = Review.query.filter_by(source='ok', is_comment=False).count()
         
         positive = Review.query.filter_by(sentiment_label='positive').count()
         negative = Review.query.filter_by(sentiment_label='negative').count()
@@ -143,15 +255,19 @@ def main():
         logger.info("✅ РЕЗУЛЬТАТЫ СБОРА")
         logger.info("=" * 70)
         logger.info(f"✓ Сохранено новых: {saved}")
-        logger.info(f"✓ Всего в базе: {total}")
+        logger.info(f"✓ Всего в базе: {total} ({articles_count} статей, {comments_count} комментариев)")
         logger.info(f"\n📊 По источникам:")
         logger.info(f"   VK: {vk_count}")
         logger.info(f"   Telegram: {tg_count}")
         logger.info(f"   Новости: {news_count}")
+        logger.info(f"   Яндекс.Дзен: {zen_count}")
+        logger.info(f"   Одноклассники: {ok_count}")
         logger.info(f"\n😊 По тональности:")
         logger.info(f"   Позитивные: {positive}")
         logger.info(f"   Негативные: {negative}")
         logger.info(f"   Нейтральные: {neutral}")
+        logger.info("\n💡 Для сбора с комментариями используйте:")
+        logger.info("   python final_collection.py --comments")
         logger.info("\n✓ Сбор завершен! Откройте веб-интерфейс:")
         logger.info("   python app.py")
         logger.info("   http://localhost:5000")

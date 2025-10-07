@@ -71,8 +71,8 @@ class Config:
     
     # OK API (Одноклассники)
     OK_APP_ID = os.getenv('OK_APP_ID', '')
-    OK_PUBLIC_KEY = os.getenv('OK_PUBLIC_KEY', '')
-    OK_SECRET_KEY = os.getenv('OK_SECRET_KEY', '')
+    OK_PUBLIC_KEY = os.getenv('OK_APP_KEY', '')  # APP_KEY = PUBLIC_KEY
+    OK_SECRET_KEY = os.getenv('OK_SESSION_SECRET_KEY', '')  # SESSION_SECRET_KEY
     OK_ACCESS_TOKEN = os.getenv('OK_ACCESS_TOKEN', '')
     OK_GROUP_IDS = os.getenv('OK_GROUP_IDS', '')
     

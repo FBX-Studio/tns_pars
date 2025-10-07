@@ -16,6 +16,13 @@ class Review(db.Model):
     published_date = db.Column(db.DateTime)
     collected_date = db.Column(db.DateTime, default=datetime.utcnow)
     
+    # Для комментариев - связь с родительской новостью
+    parent_id = db.Column(db.Integer, db.ForeignKey('reviews.id'), nullable=True)
+    is_comment = db.Column(db.Boolean, default=False)
+    
+    # Relationship
+    comments = db.relationship('Review', backref=db.backref('parent', remote_side=[id]), lazy='dynamic')
+    
     sentiment_score = db.Column(db.Float)
     sentiment_label = db.Column(db.String(20))
     keywords = db.Column(db.Text)

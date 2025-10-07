@@ -1,11 +1,13 @@
 from telethon import TelegramClient
-from telethon.tl.functions.messages import GetHistoryRequest
+from telethon.tl.functions.messages import GetHistoryRequest, GetRepliesRequest
+from telethon.errors import FloodWaitError, ChannelPrivateError, UsernameNotOccupiedError
 from datetime import datetime, timedelta
 from config import Config
 from utils.language_detector import LanguageDetector
 import logging
 import asyncio
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -156,13 +158,72 @@ class TelegramUserCollector:
             logger.error(f"Error initializing Telegram client: {e}")
             return False
     
-    async def get_channel_messages(self, channel_username, limit=200):
-        """Get messages from a channel"""
+    async def get_message_replies(self, channel, message):
+        """Get replies (comments) for a specific message"""
+        replies = []
+        
+        try:
+            if not message.replies or message.replies.replies == 0:
+                return []
+            
+            # Get replies for this message
+            result = await self.client(GetRepliesRequest(
+                peer=channel,
+                msg_id=message.id,
+                offset_id=0,
+                offset_date=None,
+                add_offset=0,
+                limit=100,
+                max_id=0,
+                min_id=0,
+                hash=0
+            ))
+            
+            for reply in result.messages:
+                if not reply.message:
+                    continue
+                
+                reply_text = reply.message
+                
+                # Basic filters for replies
+                if not self._is_russian(reply_text):
+                    continue
+                
+                replies.append({
+                    'text': reply_text,
+                    'author': reply.post_author or f'User_{reply.from_id.user_id if reply.from_id else "unknown"}',
+                    'author_id': str(reply.from_id.user_id if reply.from_id else 0),
+                    'published_date': reply.date,
+                    'source': 'telegram_comment'
+                })
+            
+            logger.debug(f"Found {len(replies)} replies for message {message.id}")
+            
+        except Exception as e:
+            logger.debug(f"Error getting replies for message {message.id}: {e}")
+        
+        return replies
+    
+    async def get_channel_messages(self, channel_username, limit=200, collect_comments=False):
+        """Get messages from a channel with flood wait handling"""
         messages = []
         
         try:
-            # Get the channel entity
-            channel = await self.client.get_entity(channel_username)
+            # Get the channel entity with flood wait handling
+            try:
+                channel = await self.client.get_entity(channel_username)
+            except FloodWaitError as e:
+                logger.warning(f"⏰ Flood wait для {channel_username}: нужно подождать {e.seconds} секунд")
+                if e.seconds < 300:  # Если меньше 5 минут - ждем
+                    logger.info(f"Ожидание {e.seconds} секунд...")
+                    await asyncio.sleep(e.seconds + 5)
+                    channel = await self.client.get_entity(channel_username)
+                else:
+                    logger.error(f"❌ Слишком долгое ожидание ({e.seconds}с), пропускаем канал")
+                    return messages
+            except (ChannelPrivateError, UsernameNotOccupiedError) as e:
+                logger.warning(f"⚠️ Канал {channel_username} недоступен: {e}")
+                return messages
             
             # Get messages from the last 30 days (увеличен период)
             offset_date = datetime.now() - timedelta(days=30)
@@ -193,24 +254,42 @@ class TelegramUserCollector:
                 if not self._is_russian(text):
                     continue
                 
-                messages.append({
+                msg_data = {
                     'source_id': f"telegram_{channel.id}_{message.id}",
                     'author': channel.title or channel_username,
                     'author_id': str(channel.id),
                     'text': text,
                     'url': f"https://t.me/{channel_username.replace('@', '')}/{message.id}",
                     'published_date': message.date,
-                    'source': 'telegram'
-                })
+                    'source': 'telegram',
+                    'is_comment': False
+                }
                 
-            logger.info(f"Found {len(messages)} relevant messages from {channel_username}")
+                messages.append(msg_data)
+                
+                # Collect comments/replies if requested
+                if collect_comments:
+                    replies = await self.get_message_replies(channel, message)
+                    
+                    for reply in replies:
+                        reply['parent_source_id'] = msg_data['source_id']
+                        reply['parent_url'] = msg_data['url']
+                        reply['source_id'] = f"{msg_data['source_id']}_reply_{hash(reply['text'])}"
+                        reply['url'] = msg_data['url']
+                        reply['is_comment'] = True
+                        messages.append(reply)
+                    
+                    if replies:
+                        await asyncio.sleep(0.3)
+                
+            logger.info(f"Found {len(messages)} relevant items from {channel_username}")
             
         except Exception as e:
             logger.error(f"Error getting messages from {channel_username}: {e}")
         
         return messages
     
-    async def search_in_channels(self):
+    async def search_in_channels(self, collect_comments=False):
         """Search for keywords in configured channels"""
         if not await self.init_client():
             return []
@@ -223,11 +302,15 @@ class TelegramUserCollector:
                     continue
                 
                 logger.info(f"Searching Telegram channel: {channel}")
-                messages = await self.get_channel_messages(channel, limit=100)
-                all_messages.extend(messages)
+                try:
+                    messages = await self.get_channel_messages(channel, limit=100, collect_comments=collect_comments)
+                    all_messages.extend(messages)
+                except FloodWaitError as e:
+                    logger.error(f"❌ Flood wait для {channel}: {e.seconds} секунд. Пропускаем оставшиеся каналы.")
+                    break  # Прекращаем сбор, чтобы не усугублять
                 
-                # Small delay to avoid rate limits
-                await asyncio.sleep(1)
+                # Увеличенная задержка между каналами
+                await asyncio.sleep(3)  # 3 секунды вместо 1
             
         except Exception as e:
             logger.error(f"Error searching Telegram channels: {e}")
@@ -244,9 +327,9 @@ class TelegramUserCollector:
             except Exception as e:
                 logger.debug(f"[TELEGRAM] Ошибка удаления временных файлов: {e}")
         
-        logger.info(f"Total messages collected from Telegram: {len(all_messages)}")
+        logger.info(f"Total items collected from Telegram: {len(all_messages)}")
         return all_messages
     
-    def collect(self):
+    def collect(self, collect_comments=False):
         """Synchronous wrapper for async collect"""
-        return asyncio.run(self.search_in_channels())
+        return asyncio.run(self.search_in_channels(collect_comments=collect_comments))
