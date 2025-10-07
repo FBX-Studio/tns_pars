@@ -1,6 +1,6 @@
 """
-Сбор новостей из Яндекс.Дзен через DuckDuckGo
-DuckDuckGo более лояльно относится к автоматическим запросам
+Сбор постов из Одноклассников через DuckDuckGo
+Обход проблем с авторизацией
 """
 import sys
 sys.stdout.reconfigure(encoding='utf-8')
@@ -15,12 +15,6 @@ from config import Config
 import logging
 import time
 import random
-import os
-import sys
-
-# Добавляем путь к utils
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'utils'))
-from proxy_manager import get_proxy_manager
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,29 +22,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class DzenDuckDuckGoCollector:
-    """Коллектор статей из Дзен через DuckDuckGo"""
+class OKDuckDuckGoCollector:
+    """Коллектор постов из OK через DuckDuckGo"""
     
-    def __init__(self, use_proxy=True):
+    def __init__(self):
         self.keywords = Config.COMPANY_KEYWORDS
-        self.use_proxy = use_proxy
-        self.proxy_manager = get_proxy_manager() if use_proxy else None
-        
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
         }
-        
-        # Инициализируем прокси если нужно
-        if self.use_proxy and self.proxy_manager:
-            logger.info("[DZEN] Режим с прокси активирован")
-            try:
-                self.proxy_manager.proxies = self.proxy_manager.get_working_proxies(count=5, test=False)
-                logger.info(f"[DZEN] Загружено {len(self.proxy_manager.proxies)} прокси")
-            except Exception as e:
-                logger.warning(f"[DZEN] Не удалось загрузить прокси: {e}")
-                self.use_proxy = False
     
     def _is_relevant(self, text):
         """Проверка релевантности"""
@@ -60,7 +41,7 @@ class DzenDuckDuckGoCollector:
         text_lower = text.lower()
         
         # Исключения
-        exclude = ['газпром', 'т плюс', 'т-плюс', 'вакансия']
+        exclude = ['газпром', 'т плюс', 'т-плюс', 'вакансия', 'требуется']
         if any(e in text_lower for e in exclude):
             return False
         
@@ -72,38 +53,29 @@ class DzenDuckDuckGoCollector:
     
     def search_duckduckgo(self, query):
         """Поиск через DuckDuckGo HTML версию"""
-        articles = []
+        posts = []
         
         try:
-            # Поиск в DuckDuckGo
-            search_query = f'site:dzen.ru {query}'
-            # Используем HTML версию DuckDuckGo
+            # Поиск в DuckDuckGo с фокусом на OK.ru и Нижний Новгород
+            search_query = f'site:ok.ru {query} "Нижний Новгород"'
             ddg_url = f'https://html.duckduckgo.com/html/?q={requests.utils.quote(search_query)}'
             
-            logger.info(f"[DZEN] Поиск в DuckDuckGo: {search_query}")
+            logger.info(f"[OK] Поиск в DuckDuckGo: {search_query}")
             
-            # Получаем прокси если включен режим прокси
-            proxies = None
-            if self.use_proxy and self.proxy_manager:
-                proxy = self.proxy_manager.get_random_proxy()
-                if proxy:
-                    proxies = proxy
-                    logger.info(f"[DZEN] Использую прокси: {list(proxy.values())[0]}")
-            
-            response = requests.get(ddg_url, headers=self.headers, proxies=proxies, timeout=15)
+            response = requests.get(ddg_url, headers=self.headers, timeout=15)
             
             if response.status_code != 200:
-                logger.warning(f"[DZEN] DuckDuckGo вернул статус {response.status_code}")
+                logger.warning(f"[OK] DuckDuckGo вернул статус {response.status_code}")
                 return []
             
-            logger.info(f"[DZEN] ✓ Успешное подключение")
+            logger.info(f"[OK] ✓ Успешное подключение")
             
             soup = BeautifulSoup(response.content, 'html.parser')
             
             # DuckDuckGo HTML использует класс 'result'
             results = soup.find_all('div', class_='result')
             
-            logger.info(f"[DZEN] Найдено результатов: {len(results)}")
+            logger.info(f"[OK] Найдено результатов: {len(results)}")
             
             for result in results:
                 try:
@@ -114,21 +86,20 @@ class DzenDuckDuckGoCollector:
                     
                     url = link_elem['href']
                     
-                    # Фильтруем только статьи Дзен
-                    if 'dzen.ru' not in url:
+                    # Фильтруем только посты OK
+                    if 'ok.ru' not in url:
                         continue
                     
                     # Извлекаем реальный URL (DuckDuckGo может оборачивать в редирект)
                     if 'uddg=' in url:
-                        # Декодируем URL из редиректа
                         from urllib.parse import unquote, parse_qs, urlparse
                         parsed = urlparse(url)
                         params = parse_qs(parsed.query)
                         if 'uddg' in params:
                             url = unquote(params['uddg'][0])
                     
-                    # Проверяем что это статья
-                    if '/a/' not in url and '/media/' not in url:
+                    # Проверяем что это пост/топик/группа
+                    if not any(x in url for x in ['/topic/', '/group/', '/profile/']):
                         continue
                     
                     # Заголовок
@@ -144,84 +115,82 @@ class DzenDuckDuckGoCollector:
                     if not self._is_relevant(full_text):
                         continue
                     
-                    # ID статьи
-                    if '/a/' in url:
-                        article_id = url.split('/a/')[-1].split('?')[0].split('#')[0]
-                    else:
-                        article_id = abs(hash(url))
+                    # ID поста
+                    post_id = abs(hash(url))
                     
                     pub_datetime = datetime.now()
                     date_str = pub_datetime.strftime('%Y%m%d')
                     
-                    articles.append({
-                        'source': 'zen',
-                        'source_id': f"dzen_{article_id}_{date_str}",
-                        'author': 'Яндекс.Дзен',
-                        'author_id': 'dzen',
+                    posts.append({
+                        'source': 'ok',
+                        'source_id': f"ok_{post_id}_{date_str}",
+                        'author': 'Одноклассники',
+                        'author_id': 'ok',
                         'text': full_text[:500],
                         'url': url,
                         'published_date': pub_datetime,
                         'date': pub_datetime
                     })
                     
-                    logger.info(f"[DZEN] ✓ {title[:60]}...")
+                    logger.info(f"[OK] ✓ {title[:60]}...")
                     
                 except Exception as e:
-                    logger.debug(f"[DZEN] Ошибка парсинга результата: {e}")
+                    logger.debug(f"[OK] Ошибка парсинга результата: {e}")
                     continue
             
         except Exception as e:
-            logger.error(f"[DZEN] Ошибка поиска: {e}")
+            logger.error(f"[OK] Ошибка поиска: {e}")
             import traceback
             traceback.print_exc()
         
-        return articles
+        return posts
     
     def collect(self):
-        """Сбор статей"""
-        all_articles = []
+        """Сбор постов"""
+        all_posts = []
         
-        logger.info(f"[DZEN] Начало сбора через DuckDuckGo")
-        logger.info(f"[DZEN] Ключевые слова: {', '.join(self.keywords[:3])}")
+        logger.info(f"[OK] Начало сбора через DuckDuckGo")
+        logger.info(f"[OK] Ключевые слова: {', '.join(self.keywords[:3])}")
         
         # Ищем по первым 3 ключевым словам
         for keyword in self.keywords[:3]:
-            logger.info(f"\n[DZEN] Поиск по: {keyword}")
-            articles = self.search_duckduckgo(keyword)
-            all_articles.extend(articles)
+            logger.info(f"\n[OK] Поиск по: {keyword}")
+            posts = self.search_duckduckgo(keyword)
+            all_posts.extend(posts)
             # Задержка между запросами
             delay = random.uniform(2, 4)
             time.sleep(delay)
         
-        logger.info(f"\n[DZEN] Всего найдено релевантных статей: {len(all_articles)}")
+        logger.info(f"\n[OK] Всего найдено релевантных постов: {len(all_posts)}")
         
-        return all_articles
+        return all_posts
 
 
 if __name__ == '__main__':
     print("="*70)
-    print("СБОР НОВОСТЕЙ ИЗ ЯНДЕКС.ДЗЕН (ЧЕРЕЗ DUCKDUCKGO)")
+    print("СБОР ПОСТОВ ИЗ ОДНОКЛАССНИКОВ (ЧЕРЕЗ DUCKDUCKGO)")
     print("="*70)
     
-    collector = DzenDuckDuckGoCollector()
+    collector = OKDuckDuckGoCollector()
     
     print(f"\nКлючевые слова для поиска: {', '.join(collector.keywords)}")
     print("\n" + "-"*70 + "\n")
     
-    articles = collector.collect()
+    posts = collector.collect()
     
     print("\n" + "="*70)
-    print(f"Найдено релевантных статей: {len(articles)}")
+    print(f"Найдено релевантных постов: {len(posts)}")
     print("="*70)
     
-    if articles:
-        print("\nНайденные статьи:\n")
-        for i, art in enumerate(articles, 1):
-            print(f"{i}. {art['text'][:150]}...")
-            print(f"   URL: {art['url']}")
+    if posts:
+        print("\nНайденные посты:\n")
+        for i, post in enumerate(posts, 1):
+            print(f"{i}. {post['text'][:150]}...")
+            print(f"   URL: {post['url']}")
             print()
     else:
-        print("\n❌ Статьи не найдены.")
+        print("\n❌ Посты не найдены.")
         print("\nВозможные причины:")
-        print("  - Нет статей с ключевыми словами в Дзен")
+        print("  - Нет постов с ключевыми словами в OK")
         print("  - DuckDuckGo изменил структуру страницы")
+        print("  - Временная блокировка запросов")

@@ -34,9 +34,12 @@ except ImportError:
                 ZenCollector = None
     
 try:
-    from collectors.ok_collector import OKCollector
+    from collectors.ok_api_collector import OKAPICollector as OKCollector
 except ImportError:
-    OKCollector = None
+    try:
+        from collectors.ok_collector import OKCollector
+    except ImportError:
+        OKCollector = None
 from analyzers.sentiment_analyzer import SentimentAnalyzer
 from analyzers.moderator import Moderator
 from config import Config

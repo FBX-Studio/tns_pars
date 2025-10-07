@@ -208,21 +208,27 @@ class OKCollector:
         
         try:
             logger.info("[OK] Запуск сбора из Одноклассников")
+            logger.warning("[OK] ⚠ ВНИМАНИЕ: OK.ru требует авторизацию для доступа к контенту")
+            logger.warning("[OK] Поисковые системы блокируют автоматические запросы")
+            logger.info("[OK] Пропускаем сбор из OK.ru")
+            logger.info("[OK] Рекомендация: Добавьте посты вручную или используйте официальный API OK")
             
+            # Возвращаем пустой список, чтобы не блокировать общий процесс
+            return []
+            
+            # Оригинальный код закомментирован (не работает из-за блокировок):
             # 1. Поиск через Google по ключевым словам
-            for keyword in self.keywords[:2]:  # Берем первые 2 ключевых слова
-                logger.info(f"[OK] Поиск по ключевому слову: {keyword}")
-                posts = self.search_ok_google(keyword)
-                all_posts.extend(posts)
-                time.sleep(2)
+            # for keyword in self.keywords[:2]:
+            #     logger.info(f"[OK] Поиск по ключевому слову: {keyword}")
+            #     posts = self.search_ok_google(keyword)
+            #     all_posts.extend(posts)
+            #     time.sleep(2)
             
             # 2. Сбор из публичных групп
-            for group in self.public_groups[:2]:  # Берем первые 2 группы
-                posts = self.collect_from_group(group)
-                all_posts.extend(posts)
-                time.sleep(2)
-            
-            logger.info(f"[OK] Всего найдено постов: {len(all_posts)}")
+            # for group in self.public_groups[:2]:
+            #     posts = self.collect_from_group(group)
+            #     all_posts.extend(posts)
+            #     time.sleep(2)
             
         except Exception as e:
             logger.error(f"[OK] Ошибка сбора: {e}")
