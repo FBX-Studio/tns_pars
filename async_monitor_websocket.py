@@ -20,15 +20,18 @@ except ImportError:
 
 # Новые коллекторы
 try:
-    from collectors.zen_collector_manual import ZenCollectorManual as ZenCollector
+    from collect_dzen_duckduckgo import DzenDuckDuckGoCollector as ZenCollector
 except ImportError:
     try:
-        from collectors.zen_collector_selenium import ZenCollectorSelenium as ZenCollector
+        from collectors.zen_collector_manual import ZenCollectorManual as ZenCollector
     except ImportError:
         try:
-            from collectors.zen_collector import ZenCollector
+            from collectors.zen_collector_selenium import ZenCollectorSelenium as ZenCollector
         except ImportError:
-            ZenCollector = None
+            try:
+                from collectors.zen_collector import ZenCollector
+            except ImportError:
+                ZenCollector = None
     
 try:
     from collectors.ok_collector import OKCollector
