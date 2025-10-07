@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - ТНС энерго НН</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f5f7fa;
+            min-height: 100vh;
+            color: #1a1f36;
+            line-height: 1.6;
+        }
+        
+        /* TNS Corporate Header */
+        .tns-header {
+            background: #0052a5;
+            color: white;
+            box-shadow: 0 2px 8px rgba(0, 82, 165, 0.2);
+        }
+        
+        .tns-top-bar {
+            background: #003d7a;
+            padding: 0.5rem 0;
+            font-size: 0.85rem;
+        }
+        
+        .tns-top-bar .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .tns-logo-section {
+            padding: 1.2rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .tns-logo-section .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        
+        .tns-logo {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+        
+        .tns-icon {
+            font-size: 2rem;
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+        }
+        
+        .tns-subtitle {
+            color: rgba(255, 255, 255, 0.85);
+            font-size: 0.9rem;
+            font-weight: 400;
+            margin-left: auto;
+        }
+        
+        /* Navigation */
+        .tns-nav {
+            background: #0052a5;
+        }
+        
+        .tns-nav .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            gap: 0;
+        }
+        
+        .tns-nav a {
+            color: white;
+            text-decoration: none;
+            padding: 1rem 1.5rem;
+            font-weight: 500;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+            border-bottom: 3px solid transparent;
+        }
+        
+        .tns-nav a:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-bottom-color: rgba(255, 255, 255, 0.5);
+        }
+        
+        .tns-nav a.active {
+            background: rgba(255, 255, 255, 0.15);
+            border-bottom-color: #fff;
+            font-weight: 600;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+        
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        
+        .stat-card {
+            background: white;
+            padding: 1.75rem;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+            border: 1px solid #e3e8ee;
+            border-left: 4px solid #0052a5;
+            transition: all 0.3s ease;
+        }
+        
+        .stat-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 4px 12px rgba(0, 82, 165, 0.15);
+        }
+        
+        .stat-card h3 {
+            color: #697386;
+            font-size: 0.85rem;
+            margin-bottom: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .stat-card .value {
+            font-size: 2.25rem;
+            font-weight: 700;
+            color: #0052a5;
+            line-height: 1;
+        }
+        
+        .stat-card .trend {
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+            color: #697386;
+        }
+        
+        .stat-card.positive { border-left-color: #00a651; }
+        .stat-card.positive .value { color: #00a651; }
+        
+        .stat-card.negative { border-left-color: #d93d4a; }
+        .stat-card.negative .value { color: #d93d4a; }
+        
+        .stat-card.neutral { border-left-color: #ff9800; }
+        .stat-card.neutral .value { color: #ff9800; }
+        
+        /* Card */
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+            margin-bottom: 2rem;
+            border: 1px solid #e3e8ee;
+        }
+        
+        .card-header {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #1a1f36;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #f5f7fa;
+        }
+        
+        /* Buttons */
+        .btn {
+            padding: 0.75rem 1.75rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            display: inline-block;
+            font-family: inherit;
+        }
+        
+        .btn-primary {
+            background: #0052a5;
+            color: white;
+            box-shadow: 0 2px 4px rgba(0, 82, 165, 0.2);
+        }
+        
+        .btn-primary:hover {
+            background: #003d7a;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 82, 165, 0.3);
+        }
+        
+        .btn-success {
+            background: #00a651;
+            color: white;
+            box-shadow: 0 2px 4px rgba(0, 166, 81, 0.2);
+        }
+        
+        .btn-success:hover {
+            background: #008c44;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 166, 81, 0.3);
+        }
+        
+        .btn-warning {
+            background: #ff9800;
+            color: white;
+            box-shadow: 0 2px 4px rgba(255, 152, 0, 0.2);
+        }
+        
+        .btn-warning:hover {
+            background: #f57c00;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(255, 152, 0, 0.3);
+        }
+        
+        .btn-danger {
+            background: #d93d4a;
+            color: white;
+            box-shadow: 0 2px 4px rgba(217, 61, 74, 0.2);
+        }
+        
+        .btn-danger:hover {
+            background: #c12e3a;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(217, 61, 74, 0.3);
+        }
+        
+        .button-group {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        /* Progress bar */
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e3e8ee;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 0.5rem;
+        }
+        
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #0052a5 0%, #00a651 100%);
+            transition: width 0.3s ease;
+            border-radius: 10px;
+        }
+        
+        /* Status badge */
+        .status {
+            display: inline-block;
+            padding: 0.35rem 0.85rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        
+        .status.running {
+            background: #fff8e6;
+            color: #ff9800;
+        }
+        
+        .status.success {
+            background: #e6f7ed;
+            color: #00a651;
+        }
+        
+        .status.idle {
+            background: #f5f7fa;
+            color: #697386;
+        }
+        
+        /* Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        
+        th, td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid #e3e8ee;
+        }
+        
+        th {
+            background: #f5f7fa;
+            font-weight: 600;
+            color: #1a1f36;
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        tbody tr {
+            transition: background 0.2s ease;
+        }
+        
+        tbody tr:hover {
+            background: #f9fafb;
+        }
+        
+        /* Badge */
+        .badge {
+            padding: 0.35rem 0.85rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: inline-block;
+        }
+        
+        .badge-positive { background: #e6f7ed; color: #00a651; }
+        .badge-negative { background: #fdeaec; color: #d93d4a; }
+        .badge-neutral { background: #f5f7fa; color: #697386; }
+        
+        /* Footer */
+        .tns-footer {
+            background: #1a1f36;
+            color: #9fa6b2;
+            padding: 2.5rem 0;
+            margin-top: 4rem;
+        }
+        
+        .tns-footer .container {
+            text-align: center;
+        }
+        
+        .tns-footer p {
+            margin: 0.5rem 0;
+            font-size: 0.9rem;
+        }
+        
+        .tns-footer strong {
+            color: #fff;
+        }
+        
+        /* Monitoring Panel */
+        .monitoring-panel {
+            background: linear-gradient(135deg, #0052a5 0%, #003d7a 100%);
+            color: white;
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+        
+        .monitoring-panel h2 {
+            margin-bottom: 1rem;
+        }
+        
+        .source-progress {
+            margin-top: 1rem;
+        }
+        
+        .source-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+        
+        .source-item h4 {
+            margin-bottom: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+    </style>
+</head>
+<body>
+    <header class="tns-header">
+        <div class="tns-top-bar">
+            <div class="container">
+                <span>Нижний Новгород</span>
+                <span>Система мониторинга отзывов</span>
+            </div>
+        </div>
+        <div class="tns-logo-section">
+            <div class="container">
+                <div class="tns-logo">
+                    <span class="tns-icon">⚡</span>
+                    <span>ТНС энерго НН</span>
+                </div>
+                <div class="tns-subtitle">Интеллектуальная система мониторинга отзывов с использованием ИИ</div>
+            </div>
+        </div>
+        <nav class="tns-nav">
+            <div class="container">
+                <a href="/" class="active">📊 Dashboard</a>
+                <a href="/reviews">📝 Отзывы</a>
+                <a href="/monitoring">📡 Мониторинг</a>
+            </div>
+        </nav>
+    </header>
+
+    <div class="container">
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Всего отзывов</h3>
+                <div class="value">{{ stats.total }}</div>
+                <div class="trend">За всё время</div>
+            </div>
+            <div class="stat-card neutral">
+                <h3>Сегодня</h3>
+                <div class="value">{{ stats.today }}</div>
+                <div class="trend">+0 за 24 часа</div>
+            </div>
+            <div class="stat-card">
+                <h3>За неделю</h3>
+                <div class="value">{{ stats.week }}</div>
+                <div class="trend">Последние 7 дней</div>
+            </div>
+            <div class="stat-card positive">
+                <h3>Позитивных</h3>
+                <div class="value">{{ stats.positive }}</div>
+                <div class="trend">0.0%</div>
+            </div>
+            <div class="stat-card negative">
+                <h3>Негативных</h3>
+                <div class="value">{{ stats.negative }}</div>
+                <div class="trend">0.0%</div>
+            </div>
+            <div class="stat-card neutral">
+                <h3>Нейтральных</h3>
+                <div class="value">{{ stats.neutral }}</div>
+                <div class="trend">0.0%</div>
+            </div>
+        </div>
+
+        <div class="monitoring-panel" id="monitoring-panel">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h2 style="margin: 0;">⚙️ Управление системой</h2>
+                <div id="monitoring-status" style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span class="status idle" id="status-badge">Ожидание</span>
+                </div>
+            </div>
+            <p><strong>Ключевые слова:</strong> {{ config.COMPANY_KEYWORDS|join(', ') if config.COMPANY_KEYWORDS else 'ТНС энерго НН, ТНС энерго, энергосбыт, ТНС' }}</p>
+            
+            <div style="margin: 1.5rem 0;">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Период парсинга:</label>
+                <select id="period-select" style="padding: 0.75rem 1rem; border: 1px solid rgba(255,255,255,0.3); border-radius: 8px; background: rgba(255,255,255,0.9); color: #1a1f36; font-size: 0.95rem; font-family: inherit; min-width: 200px; font-weight: 500;">
+                    <option value="hour">За последний час</option>
+                    <option value="day" selected>За последний день</option>
+                    <option value="week">За последнюю неделю</option>
+                    <option value="month">За последний месяц</option>
+                    <option value="all">За всё время</option>
+                </select>
+            </div>
+            
+            <div class="button-group" style="margin-top: 1rem;">
+                <button id="start-btn" onclick="startMonitoring()" class="btn btn-success">
+                    ▶ Запустить сбор
+                </button>
+                <button id="stop-btn" onclick="stopMonitoring()" class="btn btn-danger" style="display: none;">
+                    ⏹ Остановить
+                </button>
+                <button onclick="clearDatabase('reviews')" class="btn btn-warning">
+                    🗑️ Очистить отзывы
+                </button>
+                <button onclick="clearDatabase('logs')" class="btn btn-warning">
+                    🗑️ Очистить логи
+                </button>
+                <button onclick="clearDatabase('all')" class="btn btn-danger">
+                    ⚠️ Очистить всё
+                </button>
+            </div>
+            
+            <div id="progress-container" style="display: none; margin-top: 1.5rem;">
+                <h3>Прогресс сбора:</h3>
+                <div class="source-progress" id="source-progress"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">Последние отзывы</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Дата</th>
+                        <th>Источник</th>
+                        <th>Автор</th>
+                        <th>Отзыв</th>
+                        <th>Тональность</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for review in reviews %}
+                    <tr>
+                        <td>{{ review.collected_date.strftime('%d.%m.%Y %H:%M') if review.collected_date else '-' }}</td>
+                        <td><strong>{{ review.source.upper() }}</strong></td>
+                        <td>{{ review.author or 'Неизвестно' }}</td>
+                        <td>{{ review.text[:100] }}{% if review.text|length > 100 %}...{% endif %}</td>
+                        <td>
+                            {% if review.sentiment_label == 'positive' %}
+                                <span class="badge badge-positive">Позитивный</span>
+                            {% elif review.sentiment_label == 'negative' %}
+                                <span class="badge badge-negative">Негативный</span>
+                            {% else %}
+                                <span class="badge badge-neutral">Нейтральный</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <footer class="tns-footer">
+        <div class="container">
+            <p><strong>ПАО «ТНС энерго Нижний Новгород»</strong></p>
+            <p>Система интеллектуального мониторинга отзывов | © 2025</p>
+            <p>Разработано <a href="https://t.me/FBXstudio" target="_blank" style="color: #fff; text-decoration: none; font-weight: 600;">FBX Studio</a></p>
+        </div>
+    </footer>
+
+    <script>
+        const socket = io();
+        let monitoringActive = {{ 'true' if stats.is_running else 'false' }};
+        
+        // Инициализация статуса при загрузке
+        window.addEventListener('DOMContentLoaded', function() {
+            if (monitoringActive) {
+                updateMonitoringStatus(true);
+            }
+        });
+
+        socket.on('connect', function() {
+            console.log('WebSocket connected');
+            // Запрашиваем текущий статус при подключении
+            checkMonitoringStatus();
+        });
+
+        socket.on('status', function(data) {
+            console.log('Status update:', data);
+            if (data.is_running) {
+                updateMonitoringStatus(true);
+                document.getElementById('progress-container').style.display = 'block';
+            }
+        });
+
+        socket.on('monitoring_progress', function(data) {
+            console.log('Progress:', data);
+            document.getElementById('progress-container').style.display = 'block';
+            updateProgress(data);
+        });
+
+        socket.on('monitoring_started', function(data) {
+            console.log('Monitoring started:', data);
+            document.getElementById('progress-container').style.display = 'block';
+            updateMonitoringStatus(true);
+        });
+
+        socket.on('monitoring_completed', function(data) {
+            console.log('Monitoring completed:', data);
+            monitoringActive = false;
+            updateMonitoringStatus(false);
+            alert('✓ Сбор завершен! Собрано отзывов: ' + data.total_collected);
+            setTimeout(() => location.reload(), 2000);
+        });
+
+        socket.on('monitoring_error', function(data) {
+            console.log('Monitoring error:', data);
+            monitoringActive = false;
+            updateMonitoringStatus(false);
+            alert('✗ Ошибка: ' + data.error);
+        });
+
+        function checkMonitoringStatus() {
+            fetch('/api/monitoring/status')
+                .then(r => r.json())
+                .then(data => {
+                    console.log('Current status:', data);
+                    if (data.is_running) {
+                        monitoringActive = true;
+                        updateMonitoringStatus(true);
+                        document.getElementById('progress-container').style.display = 'block';
+                    } else {
+                        updateMonitoringStatus(false);
+                    }
+                })
+                .catch(err => console.error('Error checking status:', err));
+        }
+
+        function updateMonitoringStatus(isRunning) {
+            const startBtn = document.getElementById('start-btn');
+            const stopBtn = document.getElementById('stop-btn');
+            const statusBadge = document.getElementById('status-badge');
+            
+            if (isRunning) {
+                startBtn.style.display = 'none';
+                stopBtn.style.display = 'inline-block';
+                statusBadge.className = 'status running';
+                statusBadge.textContent = '⏳ Выполняется';
+            } else {
+                startBtn.style.display = 'inline-block';
+                startBtn.disabled = false;
+                startBtn.innerHTML = '▶ Запустить сбор';
+                stopBtn.style.display = 'none';
+                statusBadge.className = 'status idle';
+                statusBadge.textContent = 'Ожидание';
+            }
+        }
+
+        function startMonitoring() {
+            const period = document.getElementById('period-select').value;
+            const periodText = document.getElementById('period-select').options[document.getElementById('period-select').selectedIndex].text;
+            
+            if (!confirm(`Запустить сбор отзывов ${periodText.toLowerCase()}?`)) return;
+            
+            const btn = document.getElementById('start-btn');
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Запуск...';
+            
+            fetch('/api/monitoring/start', { 
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ period: period })
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        monitoringActive = true;
+                        updateMonitoringStatus(true);
+                        document.getElementById('progress-container').style.display = 'block';
+                    } else {
+                        alert('✗ ' + data.message);
+                        updateMonitoringStatus(false);
+                    }
+                })
+                .catch(err => {
+                    alert('✗ Ошибка запуска: ' + err);
+                    updateMonitoringStatus(false);
+                });
+        }
+
+        function stopMonitoring() {
+            if (!confirm('Остановить текущий мониторинг?')) return;
+            
+            fetch('/api/monitoring/stop', { 
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('✓ ' + data.message);
+                        updateMonitoringStatus(false);
+                    } else {
+                        alert('✗ ' + data.message);
+                    }
+                })
+                .catch(err => {
+                    alert('✗ Ошибка остановки: ' + err);
+                });
+        }
+
+        function updateProgress(data) {
+            const container = document.getElementById('source-progress');
+            const sourceDiv = document.getElementById('progress-' + data.source) || createSourceProgress(data.source);
+            
+            const progress = data.progress || 0;
+            sourceDiv.querySelector('.progress-bar-fill').style.width = progress + '%';
+            
+            let statusText = data.message || data.stage || 'В процессе...';
+            if (data.count) {
+                statusText += ` (${data.count} собрано)`;
+            } else if (data.added !== undefined) {
+                statusText += ` (${data.added} добавлено)`;
+            } else if (data.processed && data.total) {
+                statusText += ` (${data.processed}/${data.total})`;
+            }
+            
+            sourceDiv.querySelector('.progress-text').textContent = statusText;
+        }
+
+        function createSourceProgress(source) {
+            const container = document.getElementById('source-progress');
+            const div = document.createElement('div');
+            div.id = 'progress-' + source;
+            div.className = 'source-item';
+            div.innerHTML = `
+                <h4>
+                    <span>${source.toUpperCase()}</span>
+                    <span class="progress-text">Ожидание...</span>
+                </h4>
+                <div class="progress-bar">
+                    <div class="progress-bar-fill" style="width: 0%"></div>
+                </div>
+            `;
+            container.appendChild(div);
+            return div;
+        }
+
+        function clearDatabase(type) {
+            const messages = {
+                'reviews': 'Удалить все отзывы?',
+                'logs': 'Удалить все логи мониторинга?',
+                'all': 'Удалить ВСЁ? Это действие необратимо!'
+            };
+            
+            if (!confirm(messages[type])) return;
+            
+            fetch('/api/database/clear', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type: type })
+            })
+            .then(r => r.json())
+            .then(data => {
+                alert(data.success ? '✓ ' + data.message : '✗ ' + data.message);
+                if (data.success) location.reload();
+            });
+        }
+    </script>
+</body>
+</html>

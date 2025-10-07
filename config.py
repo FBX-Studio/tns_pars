@@ -1,7 +1,8 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# Загружаем .env с явным указанием кодировки UTF-8
+load_dotenv(encoding='utf-8')
 
 class Config:
     VK_ACCESS_TOKEN = os.getenv('VK_ACCESS_TOKEN', '')
@@ -9,7 +10,20 @@ class Config:
     
     DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///reviews.db')
     
-    COMPANY_KEYWORDS = os.getenv('COMPANY_KEYWORDS', 'ТНС энерго НН,ТНС энерго,энергосбыт,ТНС').split(',')
+    # Ключевые слова для мониторинга (с явной поддержкой UTF-8)
+    # Hardcoded значения гарантируют правильное отображение
+    COMPANY_KEYWORDS = ['ТНС энерго НН', 'ТНС энерго', 'энергосбыт', 'ТНС', 'TNS']
+    
+    # Попытка загрузить из .env (если там правильная кодировка)
+    _keywords = os.getenv('COMPANY_KEYWORDS', '')
+    if _keywords and _keywords.strip():
+        try:
+            loaded_keywords = [k.strip() for k in _keywords.split(',')]
+            # Проверяем что загруженные значения содержат кириллицу
+            if any('а' <= c <= 'я' or 'А' <= c <= 'Я' for keyword in loaded_keywords for c in keyword):
+                COMPANY_KEYWORDS = loaded_keywords
+        except:
+            pass  # Используем hardcoded значения
     
     VK_GROUP_IDS = os.getenv('VK_GROUP_IDS', '').split(',') if os.getenv('VK_GROUP_IDS') else []
     VK_SEARCH_QUERY = os.getenv('VK_SEARCH_QUERY', 'ТНС энерго НН')
@@ -17,6 +31,9 @@ class Config:
     TELEGRAM_CHANNELS = os.getenv('TELEGRAM_CHANNELS', '').split(',') if os.getenv('TELEGRAM_CHANNELS') else []
     
     NEWS_SITES = os.getenv('NEWS_SITES', 'https://nn.ru,https://www.vn.ru').split(',')
+    
+    # Яндекс.Дзен каналы
+    DZEN_CHANNELS = os.getenv('DZEN_CHANNELS', '').split(',') if os.getenv('DZEN_CHANNELS') else []
     
     FLASK_SECRET_KEY = os.getenv('FLASK_SECRET_KEY', 'dev_secret_key_change_in_production')
     FLASK_HOST = os.getenv('FLASK_HOST', '0.0.0.0')

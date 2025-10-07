@@ -96,7 +96,7 @@ class NewsCollector:
             logger.warning("No free proxies available")
         return self.current_proxy
     
-    def _request_with_retry(self, url, max_retries=3):
+    def _request_with_retry(self, url, max_retries=2, timeout=10):
         """Make HTTP request with retry and proxy rotation"""
         last_exception = None
         
@@ -108,7 +108,7 @@ class NewsCollector:
                     url, 
                     headers=self.headers, 
                     proxies=proxy, 
-                    timeout=15,
+                    timeout=timeout,
                     allow_redirects=True
                 )
                 response.raise_for_status()
@@ -122,7 +122,7 @@ class NewsCollector:
                     self.proxy_manager.remove_proxy(proxy)
                 
                 if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)
+                    time.sleep(1)
         
         raise last_exception
     
@@ -368,30 +368,30 @@ class NewsCollector:
         return articles
     
     def collect(self):
-        """Main collection method"""
+        """Main collection method (оптимизированный)"""
         all_articles = []
         
         logger.info("=" * 60)
-        logger.info("Starting news collection")
+        logger.info("Starting news collection (fast mode)")
         logger.info("=" * 60)
         
-        # 1. RSS feeds
-        for feed_url in self.rss_feeds:
-            articles = self.collect_from_rss(feed_url)
-            all_articles.extend(articles)
-            time.sleep(2)
+        # 1. RSS feeds (только первый для скорости)
+        if self.rss_feeds:
+            try:
+                articles = self.collect_from_rss(self.rss_feeds[0])
+                all_articles.extend(articles)
+            except Exception as e:
+                logger.error(f"RSS collection failed: {e}")
         
-        # 2. Google News
-        for query in self.search_queries:
-            articles = self.search_google_news(query)
-            all_articles.extend(articles)
-            time.sleep(3)
+        # 2. Google News (только первый запрос)
+        if self.search_queries:
+            try:
+                articles = self.search_google_news(self.search_queries[0])
+                all_articles.extend(articles)
+            except Exception as e:
+                logger.error(f"Google News collection failed: {e}")
         
-        # 3. Yandex News
-        for query in self.search_queries:
-            articles = self.search_yandex_news_rss(query)
-            all_articles.extend(articles)
-            time.sleep(3)
+        # Yandex News пропускаем для скорости (можно включить позже)
         
         logger.info(f"Total articles collected: {len(all_articles)}")
         return all_articles

@@ -27,6 +27,6 @@ if not exist .env (
 
 echo.
 echo Запуск системы...
-python run.py
+python app_enhanced.py
 
 pause

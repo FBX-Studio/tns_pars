@@ -1,0 +1,368 @@
+"""
+Улучшенное Flask приложение с WebSocket поддержкой
+"""
+from flask import Flask, render_template, request, jsonify, redirect, url_for
+from flask_sqlalchemy import SQLAlchemy
+from flask_socketio import SocketIO, emit
+from models import db, Review, MonitoringLog
+from config import Config
+from datetime import datetime, timedelta
+import logging
+import threading
+import time
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = Config.FLASK_SECRET_KEY
+app.config['SQLALCHEMY_DATABASE_URI'] = Config.DATABASE_URL
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db.init_app(app)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+
+# Глобальное состояние мониторинга
+monitoring_state = {
+    'is_running': False,
+    'stop_requested': False,
+    'progress': {},
+    'results': {},
+    'start_time': None
+}
+
+with app.app_context():
+    db.create_all()
+
+# ==================== ГЛАВНАЯ СТРАНИЦА ====================
+@app.route('/')
+def index():
+    """Современный Dashboard"""
+    with app.app_context():
+        total_reviews = Review.query.count()
+        
+        today = datetime.utcnow().date()
+        today_count = Review.query.filter(
+            db.func.date(Review.collected_date) == today
+        ).count()
+        
+        week_ago = today - timedelta(days=7)
+        week_count = Review.query.filter(
+            db.func.date(Review.collected_date) >= week_ago
+        ).count()
+        
+        positive = Review.query.filter(Review.sentiment_label == 'positive').count()
+        negative = Review.query.filter(Review.sentiment_label == 'negative').count()
+        neutral = Review.query.filter(Review.sentiment_label == 'neutral').count()
+        
+        by_source = db.session.query(
+            Review.source, 
+            db.func.count(Review.id)
+        ).group_by(Review.source).all()
+        
+        recent_reviews = Review.query.order_by(
+            Review.collected_date.desc()
+        ).limit(10).all()
+        
+        last_monitoring = MonitoringLog.query.order_by(
+            MonitoringLog.started_at.desc()
+        ).first()
+        
+        stats = {
+            'total': total_reviews,
+            'today': today_count,
+            'week': week_count,
+            'positive': positive,
+            'negative': negative,
+            'neutral': neutral,
+            'by_source': dict(by_source),
+            'last_monitoring': last_monitoring,
+            'is_running': monitoring_state['is_running']
+        }
+        
+        return render_template('dashboard_enhanced.html', 
+                             stats=stats, 
+                             reviews=recent_reviews,
+                             config=Config)
+
+# ==================== СТРАНИЦА ОТЗЫВОВ ====================
+@app.route('/reviews')
+def reviews_list():
+    """Страница со списком отзывов и фильтрами"""
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+    
+    source = request.args.get('source', '')
+    sentiment = request.args.get('sentiment', '')
+    time_filter = request.args.get('time', 'all')
+    search = request.args.get('search', '')
+    
+    query = Review.query
+    
+    # Фильтр по источнику
+    if source:
+        query = query.filter_by(source=source)
+    
+    # Фильтр по тональности
+    if sentiment:
+        query = query.filter_by(sentiment_label=sentiment)
+    
+    # Фильтр по времени
+    now = datetime.utcnow()
+    if time_filter == 'hour':
+        query = query.filter(Review.collected_date >= now - timedelta(hours=1))
+    elif time_filter == 'day':
+        query = query.filter(Review.collected_date >= now - timedelta(days=1))
+    elif time_filter == 'week':
+        query = query.filter(Review.collected_date >= now - timedelta(weeks=1))
+    elif time_filter == 'month':
+        query = query.filter(Review.collected_date >= now - timedelta(days=30))
+    elif time_filter == 'year':
+        query = query.filter(Review.collected_date >= now - timedelta(days=365))
+    
+    # Поиск по тексту
+    if search:
+        query = query.filter(Review.text.contains(search))
+    
+    pagination = query.order_by(Review.collected_date.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    
+    return render_template('reviews_enhanced.html', 
+                         pagination=pagination,
+                         source=source,
+                         sentiment=sentiment,
+                         time_filter=time_filter,
+                         search=search)
+
+# ==================== МОНИТОРИНГ ====================
+@app.route('/monitoring')
+def monitoring():
+    """Страница мониторинга с историей"""
+    logs = MonitoringLog.query.order_by(
+        MonitoringLog.started_at.desc()
+    ).limit(50).all()
+    
+    return render_template('monitoring_enhanced.html', 
+                         logs=logs, 
+                         config=Config,
+                         is_running=monitoring_state['is_running'])
+
+# ==================== API ====================
+@app.route('/api/stats')
+def api_stats():
+    """API статистики"""
+    today = datetime.utcnow().date()
+    week_ago = today - timedelta(days=7)
+    
+    total = Review.query.count()
+    today_count = Review.query.filter(
+        db.func.date(Review.collected_date) == today
+    ).count()
+    week_count = Review.query.filter(
+        db.func.date(Review.collected_date) >= week_ago
+    ).count()
+    
+    by_source = db.session.query(
+        Review.source, db.func.count(Review.id)
+    ).group_by(Review.source).all()
+    
+    by_sentiment = db.session.query(
+        Review.sentiment_label, db.func.count(Review.id)
+    ).group_by(Review.sentiment_label).all()
+    
+    return jsonify({
+        'total': total,
+        'today': today_count,
+        'week': week_count,
+        'by_source': dict(by_source),
+        'by_sentiment': dict(by_sentiment)
+    })
+
+@app.route('/api/monitoring/start', methods=['POST'])
+def start_monitoring():
+    """Запуск асинхронного мониторинга с прогрессом"""
+    if monitoring_state['is_running']:
+        return jsonify({
+            'success': False,
+            'message': 'Мониторинг уже запущен'
+        }), 400
+    
+    try:
+        # Получаем период из запроса
+        data = request.get_json() or {}
+        period = data.get('period', 'day')  # По умолчанию - день
+        
+        from async_monitor_websocket import AsyncReviewMonitorWebSocket
+        
+        monitoring_state['is_running'] = True
+        monitoring_state['progress'] = {}
+        monitoring_state['results'] = {}
+        monitoring_state['start_time'] = datetime.utcnow()
+        monitoring_state['period'] = period  # Сохраняем выбранный период
+        
+        monitor = AsyncReviewMonitorWebSocket(socketio, period=period)
+        
+        thread = threading.Thread(target=monitor.run_collection_sync)
+        thread.daemon = True
+        thread.start()
+        
+        period_text = {
+            'hour': 'за последний час',
+            'day': 'за последний день', 
+            'week': 'за последнюю неделю',
+            'month': 'за последний месяц',
+            'all': 'за всё время'
+        }.get(period, 'за выбранный период')
+        
+        return jsonify({
+            'success': True,
+            'message': f'Мониторинг запущен {period_text}. Следите за прогрессом в реальном времени.'
+        })
+    except Exception as e:
+        monitoring_state['is_running'] = False
+        logger.error(f"Error starting monitoring: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Ошибка: {str(e)}'
+        }), 500
+
+@app.route('/api/monitoring/status')
+def monitoring_status():
+    """Статус текущего мониторинга"""
+    return jsonify({
+        'is_running': monitoring_state['is_running'],
+        'progress': monitoring_state['progress'],
+        'results': monitoring_state['results'],
+        'start_time': monitoring_state['start_time'].isoformat() if monitoring_state['start_time'] else None
+    })
+
+@app.route('/api/database/clear', methods=['POST'])
+def clear_database():
+    """Очистка базы данных"""
+    try:
+        data = request.get_json()
+        clear_type = data.get('type', 'all')
+        
+        if clear_type == 'reviews':
+            count = Review.query.count()
+            Review.query.delete()
+            message = f'Удалено отзывов: {count}'
+        elif clear_type == 'logs':
+            count = MonitoringLog.query.count()
+            MonitoringLog.query.delete()
+            message = f'Удалено логов: {count}'
+        elif clear_type == 'all':
+            reviews_count = Review.query.count()
+            logs_count = MonitoringLog.query.count()
+            Review.query.delete()
+            MonitoringLog.query.delete()
+            message = f'Удалено отзывов: {reviews_count}, логов: {logs_count}'
+        else:
+            return jsonify({'success': False, 'message': 'Неверный тип очистки'}), 400
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': message
+        })
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error clearing database: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Ошибка: {str(e)}'
+        }), 500
+
+@app.route('/api/monitoring/stop', methods=['POST'])
+def stop_monitoring():
+    """Остановка мониторинга"""
+    if not monitoring_state['is_running']:
+        return jsonify({
+            'success': False,
+            'message': 'Мониторинг не запущен'
+        }), 400
+    
+    # Помечаем что нужно остановить
+    monitoring_state['is_running'] = False
+    monitoring_state['stop_requested'] = True
+    
+    return jsonify({
+        'success': True,
+        'message': 'Запрос на остановку отправлен'
+    })
+
+@app.route('/api/reviews/filtered', methods=['GET'])
+def get_filtered_reviews():
+    """Получение отзывов с фильтрацией"""
+    time_filter = request.args.get('time', 'all')
+    source = request.args.get('source', '')
+    sentiment = request.args.get('sentiment', '')
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 50, type=int)
+    
+    query = Review.query
+    
+    # Фильтр по времени
+    now = datetime.utcnow()
+    if time_filter == 'hour':
+        query = query.filter(Review.collected_date >= now - timedelta(hours=1))
+    elif time_filter == 'day':
+        query = query.filter(Review.collected_date >= now - timedelta(days=1))
+    elif time_filter == 'week':
+        query = query.filter(Review.collected_date >= now - timedelta(weeks=1))
+    elif time_filter == 'month':
+        query = query.filter(Review.collected_date >= now - timedelta(days=30))
+    elif time_filter == 'year':
+        query = query.filter(Review.collected_date >= now - timedelta(days=365))
+    
+    # Дополнительные фильтры
+    if source:
+        query = query.filter_by(source=source)
+    if sentiment:
+        query = query.filter_by(sentiment_label=sentiment)
+    
+    total = query.count()
+    reviews = query.order_by(Review.collected_date.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+    
+    return jsonify({
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+        'pages': reviews.pages,
+        'reviews': [r.to_dict() for r in reviews.items]
+    })
+
+# ==================== WebSocket СОБЫТИЯ ====================
+@socketio.on('connect')
+def handle_connect(auth=None):
+    """Клиент подключился"""
+    logger.info('Client connected')
+    # Сериализуем datetime в ISO формат для JSON
+    state_copy = monitoring_state.copy()
+    if state_copy.get('start_time'):
+        state_copy['start_time'] = state_copy['start_time'].isoformat()
+    emit('status', state_copy)
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Клиент отключился"""
+    logger.info('Client disconnected')
+
+@socketio.on('request_status')
+def handle_status_request():
+    """Запрос статуса"""
+    state_copy = monitoring_state.copy()
+    if state_copy.get('start_time'):
+        state_copy['start_time'] = state_copy['start_time'].isoformat()
+    emit('status', state_copy)
+
+if __name__ == '__main__':
+    socketio.run(app, 
+                host=Config.FLASK_HOST, 
+                port=Config.FLASK_PORT, 
+                debug=Config.FLASK_DEBUG,
+                allow_unsafe_werkzeug=True)

@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Мониторинг - ТНС энерго НН</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f5f7fa;
+            min-height: 100vh;
+            color: #1a1f36;
+            line-height: 1.6;
+        }
+        
+        /* TNS Corporate Header */
+        .tns-header {
+            background: #0052a5;
+            color: white;
+            box-shadow: 0 2px 8px rgba(0, 82, 165, 0.2);
+        }
+        
+        .tns-top-bar {
+            background: #003d7a;
+            padding: 0.5rem 0;
+            font-size: 0.85rem;
+        }
+        
+        .tns-top-bar .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .tns-logo-section {
+            padding: 1.2rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .tns-logo-section .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        
+        .tns-logo {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+        
+        .tns-icon {
+            font-size: 2rem;
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2));
+        }
+        
+        .tns-subtitle {
+            color: rgba(255, 255, 255, 0.85);
+            font-size: 0.9rem;
+            font-weight: 400;
+            margin-left: auto;
+        }
+        
+        /* Navigation */
+        .tns-nav {
+            background: #0052a5;
+        }
+        
+        .tns-nav .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 2rem;
+            display: flex;
+            gap: 0;
+        }
+        
+        .tns-nav a {
+            color: white;
+            text-decoration: none;
+            padding: 1rem 1.5rem;
+            font-weight: 500;
+            font-size: 0.95rem;
+            transition: all 0.2s ease;
+            border-bottom: 3px solid transparent;
+        }
+        
+        .tns-nav a:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-bottom-color: rgba(255, 255, 255, 0.5);
+        }
+        
+        .tns-nav a.active {
+            background: rgba(255, 255, 255, 0.15);
+            border-bottom-color: #fff;
+            font-weight: 600;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+        
+        /* Card */
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+            margin-bottom: 2rem;
+            border: 1px solid #e3e8ee;
+        }
+        
+        .card-header {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #1a1f36;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #f5f7fa;
+        }
+        
+        /* Settings Grid */
+        .settings-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .info-item {
+            padding: 1.5rem;
+            background: #f9fafb;
+            border-radius: 8px;
+            border-left: 4px solid #0052a5;
+            border: 1px solid #e3e8ee;
+        }
+        
+        .info-item label {
+            display: block;
+            color: #697386;
+            font-size: 0.85rem;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .info-item .value {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #1a1f36;
+        }
+        
+        .info-item.status { border-left-color: #00a651; }
+        .info-item.sources { border-left-color: #ff9800; }
+        
+        .keywords {
+            background: #fff8e6;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            border-left: 4px solid #ff9800;
+            margin-bottom: 1.5rem;
+        }
+        
+        .keywords strong {
+            color: #1a1f36;
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+        
+        .keywords span {
+            color: #697386;
+        }
+        
+        /* Buttons */
+        .btn {
+            padding: 0.75rem 1.75rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            display: inline-block;
+            font-family: inherit;
+        }
+        
+        .btn-primary {
+            background: #0052a5;
+            color: white;
+            box-shadow: 0 2px 4px rgba(0, 82, 165, 0.2);
+        }
+        
+        .btn-primary:hover {
+            background: #003d7a;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 82, 165, 0.3);
+        }
+        
+        .btn-success {
+            background: #00a651;
+            color: white;
+            box-shadow: 0 2px 4px rgba(0, 166, 81, 0.2);
+        }
+        
+        .btn-success:hover {
+            background: #008c44;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 166, 81, 0.3);
+        }
+        
+        /* Table */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        
+        th, td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid #e3e8ee;
+        }
+        
+        th {
+            background: #f5f7fa;
+            font-weight: 600;
+            color: #1a1f36;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        tbody tr {
+            transition: background 0.2s ease;
+        }
+        
+        tbody tr:hover {
+            background: #f9fafb;
+        }
+        
+        /* Badge */
+        .badge {
+            padding: 0.35rem 0.85rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: inline-block;
+        }
+        
+        .badge-success { background: #e6f7ed; color: #00a651; }
+        .badge-error { background: #fdeaec; color: #d93d4a; }
+        .badge-running { background: #fff8e6; color: #ff9800; }
+        .badge-idle { background: #f5f7fa; color: #697386; }
+        
+        /* Footer */
+        .tns-footer {
+            background: #1a1f36;
+            color: #9fa6b2;
+            padding: 2.5rem 0;
+            margin-top: 4rem;
+        }
+        
+        .tns-footer .container {
+            text-align: center;
+        }
+        
+        .tns-footer p {
+            margin: 0.5rem 0;
+            font-size: 0.9rem;
+        }
+        
+        .tns-footer strong {
+            color: #fff;
+        }
+        
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: #697386;
+        }
+        
+        .empty-state h3 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: #1a1f36;
+        }
+    </style>
+</head>
+<body>
+    <header class="tns-header">
+        <div class="tns-top-bar">
+            <div class="container">
+                <span>Нижний Новгород</span>
+                <span>Система мониторинга отзывов</span>
+            </div>
+        </div>
+        <div class="tns-logo-section">
+            <div class="container">
+                <div class="tns-logo">
+                    <span class="tns-icon">⚡</span>
+                    <span>ТНС энерго НН</span>
+                </div>
+                <div class="tns-subtitle">Интеллектуальная система мониторинга отзывов с использованием ИИ</div>
+            </div>
+        </div>
+        <nav class="tns-nav">
+            <div class="container">
+                <a href="/">📊 Dashboard</a>
+                <a href="/reviews">📝 Отзывы</a>
+                <a href="/monitoring" class="active">📡 Мониторинг</a>
+            </div>
+        </nav>
+    </header>
+
+    <div class="container">
+        <div class="card">
+            <div class="card-header">⚙️ Настройки мониторинга</div>
+            
+            <div class="settings-info">
+                <div class="info-item">
+                    <label>Интервал проверки</label>
+                    <div class="value">Каждые {{ config.MONITORING_INTERVAL_MINUTES }} минут</div>
+                </div>
+                
+                <div class="info-item status">
+                    <label>Статус системы</label>
+                    <div class="value">
+                        {% if is_running %}
+                            <span class="badge badge-running">● Выполняется</span>
+                        {% else %}
+                            <span class="badge badge-idle">○ Ожидание</span>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                <div class="info-item sources">
+                    <label>Источников данных</label>
+                    <div class="value">3 активных</div>
+                </div>
+            </div>
+            
+            <div class="keywords">
+                <strong>Ключевые слова для мониторинга:</strong>
+                <span>{{ config.COMPANY_KEYWORDS|join(', ') if config.COMPANY_KEYWORDS else 'ТНС энерго НН, ТНС энерго, энергосбыт, ТНС' }}</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">📋 История запусков</div>
+            
+            {% if logs %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Источник</th>
+                            <th>Начало</th>
+                            <th>Завершение</th>
+                            <th>Длительность</th>
+                            <th>Статус</th>
+                            <th>Собрано</th>
+                            <th>Ошибка</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in logs %}
+                        <tr>
+                            <td><strong>#{{ log.id }}</strong></td>
+                            <td>
+                                <span style="background: #e6f0ff; color: #0052a5; padding: 0.25rem 0.75rem; border-radius: 15px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase;">
+                                    {{ log.source.upper() }}
+                                </span>
+                            </td>
+                            <td>{{ log.started_at.strftime('%d.%m.%Y %H:%M:%S') if log.started_at else '-' }}</td>
+                            <td>{{ log.completed_at.strftime('%d.%m.%Y %H:%M:%S') if log.completed_at else '-' }}</td>
+                            <td>
+                                {% if log.started_at and log.completed_at %}
+                                    {{ ((log.completed_at - log.started_at).total_seconds() / 60) | round(1) }} мин
+                                {% else %}
+                                    -
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if log.status == 'success' %}
+                                    <span class="badge badge-success">✓ Успешно</span>
+                                {% elif log.status == 'error' %}
+                                    <span class="badge badge-error">✗ Ошибка</span>
+                                {% elif log.status == 'running' %}
+                                    <span class="badge badge-running">⏳ Выполняется</span>
+                                {% else %}
+                                    <span class="badge badge-idle">{{ log.status }}</span>
+                                {% endif %}
+                            </td>
+                            <td><strong>{{ log.reviews_collected }}</strong></td>
+                            <td style="max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d93d4a;">
+                                {{ log.error_message or '-' }}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <div class="empty-state">
+                    <h3>📭 История пуста</h3>
+                    <p>Запустите первый сбор данных</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <footer class="tns-footer">
+        <div class="container">
+            <p><strong>ПАО «ТНС энерго Нижний Новгород»</strong></p>
+            <p>Система интеллектуального мониторинга отзывов | © 2025</p>
+            <p>Разработано <a href="https://t.me/FBXstudio" target="_blank" style="color: #fff; text-decoration: none; font-weight: 600;">FBX Studio</a></p>
+        </div>
+    </footer>
+</body>
+</html>

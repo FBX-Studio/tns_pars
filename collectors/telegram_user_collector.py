@@ -21,8 +21,11 @@ class TelegramUserCollector:
         self.language_detector = LanguageDetector()
         self.client = None
         
-        # Session file
-        self.session_file = 'telegram_session'
+        # Session file - используем уникальное имя для избежания блокировки
+        import os
+        import time
+        self.session_file = f'telegram_session_{int(time.time())}'
+        self.main_session = 'telegram_session'
         
         if not self.api_id or not self.api_hash:
             logger.warning("TELEGRAM_API_ID and TELEGRAM_API_HASH not configured")
@@ -121,6 +124,16 @@ class TelegramUserCollector:
             return False
         
         try:
+            import shutil
+            
+            # Копируем основную сессию если она существует
+            if os.path.exists(f'{self.main_session}.session'):
+                try:
+                    shutil.copy2(f'{self.main_session}.session', f'{self.session_file}.session')
+                    logger.info(f"[TELEGRAM] Скопирована сессия из {self.main_session}")
+                except Exception as e:
+                    logger.warning(f"[TELEGRAM] Не удалось скопировать сессию: {e}")
+            
             proxy = self._setup_proxy()
             
             # Create Telegram client with optional proxy
@@ -221,6 +234,15 @@ class TelegramUserCollector:
         finally:
             if self.client:
                 await self.client.disconnect()
+            
+            # Удаляем временную сессию
+            try:
+                import glob
+                for f in glob.glob(f'{self.session_file}*'):
+                    os.remove(f)
+                    logger.debug(f"[TELEGRAM] Удалён временный файл: {f}")
+            except Exception as e:
+                logger.debug(f"[TELEGRAM] Ошибка удаления временных файлов: {e}")
         
         logger.info(f"Total messages collected from Telegram: {len(all_messages)}")
         return all_messages
