@@ -8,11 +8,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 class VKCollector:
-    def __init__(self):
+    def __init__(self, sentiment_analyzer=None):
         self.access_token = Config.VK_ACCESS_TOKEN
         self.keywords = Config.COMPANY_KEYWORDS
         self.max_comments = Config.MAX_COMMENTS_PER_REQUEST
         self.language_detector = LanguageDetector()
+        self.sentiment_analyzer = sentiment_analyzer
         self.proxies = self._setup_proxy()
         
         if self.access_token:
@@ -137,6 +138,13 @@ class VKCollector:
                     'published_date': datetime.fromtimestamp(item.get('date', 0)),
                     'source': 'vk'
                 }
+                
+                # Анализ тональности
+                if self.sentiment_analyzer:
+                    sentiment = self.sentiment_analyzer.analyze(text)
+                    post['sentiment_score'] = sentiment['sentiment_score']
+                    post['sentiment_label'] = sentiment['sentiment_label']
+                
                 posts.append(post)
             
             return posts
@@ -161,7 +169,7 @@ class VKCollector:
             for comment in comments.get('items', []):
                 text = comment.get('text', '')
                 if text and self._is_relevant_to_company(text) and self._is_nizhny_region(text) and self._is_russian(text):
-                    result.append({
+                    comment_data = {
                         'source_id': f"vk_comment_{owner_id}_{post_id}_{comment['id']}",
                         'author': self._get_comment_author(comment, comments),
                         'author_id': str(comment.get('from_id', '')),
@@ -169,7 +177,15 @@ class VKCollector:
                         'url': f"https://vk.com/wall{owner_id}_{post_id}?reply={comment['id']}",
                         'published_date': datetime.fromtimestamp(comment.get('date', 0)),
                         'source': 'vk'
-                    })
+                    }
+                    
+                    # Анализ тональности
+                    if self.sentiment_analyzer:
+                        sentiment = self.sentiment_analyzer.analyze(text)
+                        comment_data['sentiment_score'] = sentiment['sentiment_score']
+                        comment_data['sentiment_label'] = sentiment['sentiment_label']
+                    
+                    result.append(comment_data)
             
             return result
         except Exception as e:
@@ -193,7 +209,7 @@ class VKCollector:
                     text = post.get('text', '')
                     
                     if self._is_relevant_to_company(text) and self._is_nizhny_region(text) and self._is_russian(text):
-                        all_posts.append({
+                        post_data = {
                             'source_id': f"vk_post_{post['owner_id']}_{post['id']}",
                             'author': f"Group {group_id}",
                             'author_id': str(post.get('owner_id', '')),
@@ -201,7 +217,15 @@ class VKCollector:
                             'url': f"https://vk.com/wall{post['owner_id']}_{post['id']}",
                             'published_date': datetime.fromtimestamp(post.get('date', 0)),
                             'source': 'vk'
-                        })
+                        }
+                        
+                        # Анализ тональности
+                        if self.sentiment_analyzer:
+                            sentiment = self.sentiment_analyzer.analyze(text)
+                            post_data['sentiment_score'] = sentiment['sentiment_score']
+                            post_data['sentiment_label'] = sentiment['sentiment_label']
+                        
+                        all_posts.append(post_data)
                 
                 time.sleep(0.5)
             except Exception as e:

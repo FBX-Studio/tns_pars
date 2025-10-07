@@ -14,12 +14,13 @@ logger = logging.getLogger(__name__)
 class OKAPICollector:
     """Коллектор постов из OK через официальный API"""
     
-    def __init__(self):
+    def __init__(self, sentiment_analyzer=None):
         self.app_id = Config.get('OK_APP_ID', '')
         self.public_key = Config.get('OK_PUBLIC_KEY', '')
         self.secret_key = Config.get('OK_SECRET_KEY', '')
         self.access_token = Config.get('OK_ACCESS_TOKEN', '')
         self.keywords = Config.COMPANY_KEYWORDS
+        self.sentiment_analyzer = sentiment_analyzer
         
         self.api_url = 'https://api.ok.ru/fb.do'
         

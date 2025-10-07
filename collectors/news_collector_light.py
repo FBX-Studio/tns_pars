@@ -14,8 +14,9 @@ logger = logging.getLogger(__name__)
 class NewsCollectorLight:
     """Коллектор новостей через Google News RSS с прокси"""
     
-    def __init__(self):
+    def __init__(self, sentiment_analyzer=None):
         self.keywords = Config.COMPANY_KEYWORDS
+        self.sentiment_analyzer = sentiment_analyzer
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -249,7 +250,7 @@ class NewsCollectorLight:
                         # Это позволяет одной статье появляться раз в день
                         date_str = pub_date.strftime('%Y%m%d') if pub_date else datetime.now().strftime('%Y%m%d')
                         
-                        articles.append({
+                        article = {
                             'source': 'news',
                             'source_id': f"gnews_{abs(hash(real_url))}_{date_str}",
                             'author': source_name,
@@ -258,7 +259,15 @@ class NewsCollectorLight:
                             'url': real_url,  # Используем реальный URL
                             'published_date': pub_date,
                             'date': pub_date  # Добавляем для фильтрации по периоду
-                        })
+                        }
+                        
+                        # Анализ тональности
+                        if self.sentiment_analyzer:
+                            sentiment = self.sentiment_analyzer.analyze(clean_text)
+                            article['sentiment_score'] = sentiment['sentiment_score']
+                            article['sentiment_label'] = sentiment['sentiment_label']
+                        
+                        articles.append(article)
                     else:
                         logger.debug(f"[NEWS] Не релевантна (исключение): {title[:40]}...")
                     

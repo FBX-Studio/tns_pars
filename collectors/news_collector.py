@@ -1,5 +1,6 @@
 """
 Улучшенный коллектор новостей с поддержкой RSS, прокси и множества источников
+С интегрированным анализом тональности через Dostoevsky
 """
 import requests
 from bs4 import BeautifulSoup
@@ -25,9 +26,10 @@ logger = logging.getLogger(__name__)
 class NewsCollector:
     """Продвинутый коллектор новостей с RSS и веб-скрапингом"""
     
-    def __init__(self):
+    def __init__(self, sentiment_analyzer=None):
         self.keywords = Config.COMPANY_KEYWORDS
         self.language_detector = LanguageDetector()
+        self.sentiment_analyzer = sentiment_analyzer
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -200,7 +202,7 @@ class NewsCollector:
                         except:
                             pass
                     
-                    articles.append({
+                    article = {
                         'source_id': f"rss_{hash(link)}",
                         'author': urlparse(feed_url).netloc,
                         'author_id': urlparse(feed_url).netloc,
@@ -208,7 +210,15 @@ class NewsCollector:
                         'url': link,
                         'published_date': published_date,
                         'source': 'news'
-                    })
+                    }
+                    
+                    # Анализ тональности
+                    if self.sentiment_analyzer:
+                        sentiment = self.sentiment_analyzer.analyze(article['text'])
+                        article['sentiment_score'] = sentiment['sentiment_score']
+                        article['sentiment_label'] = sentiment['sentiment_label']
+                    
+                    articles.append(article)
             else:
                 # Альтернативный парсинг через BeautifulSoup
                 response = self._request_with_retry(feed_url)
@@ -232,7 +242,7 @@ class NewsCollector:
                     if not self._is_russian(full_text):
                         continue
                     
-                    articles.append({
+                    article = {
                         'source_id': f"rss_{hash(link)}",
                         'author': urlparse(feed_url).netloc,
                         'author_id': urlparse(feed_url).netloc,
@@ -240,7 +250,15 @@ class NewsCollector:
                         'url': link,
                         'published_date': datetime.now(),
                         'source': 'news'
-                    })
+                    }
+                    
+                    # Анализ тональности
+                    if self.sentiment_analyzer:
+                        sentiment = self.sentiment_analyzer.analyze(article['text'])
+                        article['sentiment_score'] = sentiment['sentiment_score']
+                        article['sentiment_label'] = sentiment['sentiment_label']
+                    
+                    articles.append(article)
             
             logger.info(f"Found {len(articles)} relevant articles from {feed_url}")
             
@@ -278,7 +296,7 @@ class NewsCollector:
                         except:
                             pass
                     
-                    articles.append({
+                    article = {
                         'source_id': f"google_news_{hash(link)}",
                         'author': 'Google News',
                         'author_id': 'google_news',
@@ -286,7 +304,15 @@ class NewsCollector:
                         'url': link,
                         'published_date': published_date,
                         'source': 'news'
-                    })
+                    }
+                    
+                    # Анализ тональности
+                    if self.sentiment_analyzer:
+                        sentiment = self.sentiment_analyzer.analyze(article['text'])
+                        article['sentiment_score'] = sentiment['sentiment_score']
+                        article['sentiment_label'] = sentiment['sentiment_label']
+                    
+                    articles.append(article)
             else:
                 # Альтернативный парсинг
                 response = self._request_with_retry(search_url)
@@ -302,7 +328,7 @@ class NewsCollector:
                     if not self._is_relevant(title):
                         continue
                     
-                    articles.append({
+                    article = {
                         'source_id': f"google_news_{hash(link)}",
                         'author': 'Google News',
                         'author_id': 'google_news',
@@ -310,7 +336,15 @@ class NewsCollector:
                         'url': link,
                         'published_date': datetime.now(),
                         'source': 'news'
-                    })
+                    }
+                    
+                    # Анализ тональности
+                    if self.sentiment_analyzer:
+                        sentiment = self.sentiment_analyzer.analyze(article['text'])
+                        article['sentiment_score'] = sentiment['sentiment_score']
+                        article['sentiment_label'] = sentiment['sentiment_label']
+                    
+                    articles.append(article)
             
             logger.info(f"Found {len(articles)} articles from Google News for '{query}'")
             
@@ -350,7 +384,7 @@ class NewsCollector:
                 if not self._is_relevant(full_text):
                     continue
                 
-                articles.append({
+                article = {
                     'source_id': f"yandex_news_{hash(link)}",
                     'author': 'Yandex News',
                     'author_id': 'yandex_news',
@@ -358,7 +392,15 @@ class NewsCollector:
                     'url': link,
                     'published_date': datetime.now(),
                     'source': 'news'
-                })
+                }
+                
+                # Анализ тональности
+                if self.sentiment_analyzer:
+                    sentiment = self.sentiment_analyzer.analyze(article['text'])
+                    article['sentiment_score'] = sentiment['sentiment_score']
+                    article['sentiment_label'] = sentiment['sentiment_label']
+                
+                articles.append(article)
             
             logger.info(f"Found {len(articles)} articles from Yandex News for '{query}'")
             

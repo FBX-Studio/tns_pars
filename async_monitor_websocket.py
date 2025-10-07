@@ -42,6 +42,7 @@ except ImportError:
         OKCollector = None
 from analyzers.sentiment_analyzer import SentimentAnalyzer
 from analyzers.moderator import Moderator
+from analyzers.dostoevsky_analyzer import DostoevskyAnalyzer
 from config import Config
 from app_enhanced import app
 
@@ -52,12 +53,23 @@ class AsyncReviewMonitorWebSocket:
         self.socketio = socketio
         self.period = period
         self.since_date = self._calculate_since_date(period)
-        self.vk_collector = VKCollector()
+        
+        # Инициализируем анализатор Dostoevsky
+        try:
+            logger.info("[MONITOR] Инициализация Dostoevsky анализатора...")
+            self.sentiment_analyzer = DostoevskyAnalyzer()
+            logger.info("[MONITOR] ✓ Dostoevsky анализатор загружен")
+        except Exception as e:
+            logger.warning(f"[MONITOR] Не удалось загрузить Dostoevsky: {e}")
+            logger.warning("[MONITOR] Используем стандартный анализатор")
+            self.sentiment_analyzer = SentimentAnalyzer()
+        
+        # Инициализируем коллекторы с анализатором
+        self.vk_collector = VKCollector(sentiment_analyzer=self.sentiment_analyzer)
         self.telegram_collector = TelegramCollector()
-        self.news_collector = NewsCollector()
+        self.news_collector = NewsCollector(sentiment_analyzer=self.sentiment_analyzer)
         self.zen_collector = ZenCollector() if ZenCollector else None
-        self.ok_collector = OKCollector() if OKCollector else None
-        self.sentiment_analyzer = SentimentAnalyzer()
+        self.ok_collector = OKCollector(sentiment_analyzer=self.sentiment_analyzer) if OKCollector else None
         self.moderator = Moderator()
         self.is_running = False
     
