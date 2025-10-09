@@ -280,7 +280,7 @@ class TelegramUserCollector:
                         messages.append(reply)
                     
                     if replies:
-                        await asyncio.sleep(0.3)
+                        await asyncio.sleep(1)  # Увеличено с 0.3 до 1 сек
                 
             logger.info(f"Found {len(messages)} relevant items from {channel_username}")
             
@@ -309,8 +309,8 @@ class TelegramUserCollector:
                     logger.error(f"❌ Flood wait для {channel}: {e.seconds} секунд. Пропускаем оставшиеся каналы.")
                     break  # Прекращаем сбор, чтобы не усугублять
                 
-                # Увеличенная задержка между каналами
-                await asyncio.sleep(3)  # 3 секунды вместо 1
+                # Увеличенная задержка между каналами (защита от FloodWait)
+                await asyncio.sleep(10)  # 10 секунд для безопасности
             
         except Exception as e:
             logger.error(f"Error searching Telegram channels: {e}")

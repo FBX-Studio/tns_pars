@@ -20,9 +20,11 @@ logger = logging.getLogger(__name__)
 class ZenSeleniumCollector:
     """Коллектор статей из Яндекс.Дзен через Selenium"""
     
-    def __init__(self):
-        self.keywords = Config.COMPANY_KEYWORDS
+    def __init__(self, sentiment_analyzer=None):
+        # Используем hardcoded ключевые слова для избежания проблем с кодировкой
+        self.keywords = ['ТНС энерго НН', 'ТНС энерго', 'энергосбыт', 'ТНС']
         self.driver = None
+        self.sentiment_analyzer = sentiment_analyzer  # Для совместимости с app_enhanced.py
         
     def _init_driver(self, headless=True):
         """Инициализация Selenium WebDriver"""
@@ -53,7 +55,14 @@ class ZenSeleniumCollector:
             chrome_options.add_experimental_option('prefs', prefs)
             
             logger.info("[SELENIUM] Запуск Chrome WebDriver...")
-            service = Service(ChromeDriverManager().install())
+            
+            # Получаем путь к ChromeDriver
+            driver_path = ChromeDriverManager().install()
+            # Исправляем путь если он указывает на THIRD_PARTY_NOTICES
+            if driver_path.endswith('THIRD_PARTY_NOTICES.chromedriver'):
+                driver_path = driver_path.replace('THIRD_PARTY_NOTICES.chromedriver', 'chromedriver.exe')
+            
+            service = Service(driver_path)
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             
             # Скрываем признаки WebDriver

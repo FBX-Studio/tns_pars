@@ -3,7 +3,17 @@
 """
 import sys
 import os
+import logging
+import argparse
+from datetime import datetime
 from dotenv import load_dotenv
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # Принудительная перезагрузка .env
 load_dotenv(override=True)
@@ -15,21 +25,33 @@ from collectors.news_collector import NewsCollector
 from collectors.zen_collector import ZenCollector
 from collectors.zen_selenium_collector import ZenSeleniumCollector
 try:
-    from collectors.ok_api_collector import OKAPICollector
+    from collectors.ok_selenium_collector import OKSeleniumCollector as OKAPICollector
+    logger.info("Используется OK Selenium коллектор (обход ограничений API)")
 except ImportError:
-    from collectors.ok_collector import OKCollector as OKAPICollector
+    try:
+        from collectors.ok_api_collector import OKAPICollector
+        logger.warning("OK Selenium не найден, используется API коллектор (ограниченный)")
+    except ImportError:
+        from collectors.ok_collector import OKCollector as OKAPICollector
+        logger.warning("Используется базовый OK коллектор")
 from analyzers.sentiment_analyzer import SentimentAnalyzer
 from analyzers.moderator import Moderator
-from app import app
-from datetime import datetime
-import logging
-import argparse
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Импорт app с обработкой ошибок
+try:
+    from app_enhanced import app
+except ImportError:
+    try:
+        from app import app
+    except ImportError:
+        # Создаем минимальный app context если app не найден
+        from flask import Flask
+        from models import db
+        from config import Config
+        app = Flask(__name__)
+        app.config['SQLALCHEMY_DATABASE_URI'] = Config.DATABASE_URL
+        app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+        db.init_app(app)
 
 def main():
     # Parse arguments
@@ -42,7 +64,9 @@ def main():
     parser.add_argument('--no-zen', action='store_true', help='Пропустить Яндекс.Дзен')
     parser.add_argument('--no-ok', action='store_true', help='Пропустить Одноклассники')
     parser.add_argument('--zen-selenium', action='store_true', 
-                       help='Использовать Selenium для Дзена (обход капчи, медленнее)')
+                       help='Использовать Selenium для Дзена (используется по умолчанию)')
+    parser.add_argument('--zen-simple', action='store_true',
+                       help='Использовать простой коллектор Дзена (без Selenium, может не работать)')
     args = parser.parse_args()
     
     logger.info("\n" + "=" * 70)
@@ -69,11 +93,13 @@ def main():
     news_collector.current_proxy = None
     
     # Выбор коллектора для Дзена
-    if args.zen_selenium:
+    # По умолчанию используем Selenium для обхода капчи
+    if args.zen_simple:
+        logger.info("⚠️ Используется обычный коллектор Дзена (может быть капча)")
+        zen_collector = ZenCollector()
+    else:
         logger.info("🌐 Используется Selenium для Яндекс.Дзен (обход капчи)")
         zen_collector = ZenSeleniumCollector()
-    else:
-        zen_collector = ZenCollector()
     
     ok_collector = OKAPICollector()
     

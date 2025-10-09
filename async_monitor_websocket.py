@@ -6,6 +6,9 @@ import logging
 from datetime import datetime
 from models import db, Review, MonitoringLog
 from collectors.vk_collector import VKCollector
+
+# Настройка логгера
+logger = logging.getLogger(__name__)
 try:
     from collectors.telegram_user_collector import TelegramUserCollector as TelegramCollector
 except ImportError:
@@ -18,28 +21,31 @@ except ImportError:
     except ImportError:
         from collectors.web_collector import WebCollector as NewsCollector
 
-# Новые коллекторы
+# Новые коллекторы - используем Selenium для Дзена (обход капчи)
 try:
-    from collect_dzen_duckduckgo import DzenDuckDuckGoCollector as ZenCollector
+    from collectors.zen_selenium_collector import ZenSeleniumCollector as ZenCollector
+    logger.info("[MONITOR] Используется ZenSeleniumCollector (обход капчи)")
 except ImportError:
     try:
-        from collectors.zen_collector_manual import ZenCollectorManual as ZenCollector
+        from collectors.zen_collector import ZenCollector
+        logger.warning("[MONITOR] ZenSeleniumCollector не найден, используется обычный коллектор")
     except ImportError:
-        try:
-            from collectors.zen_collector_selenium import ZenCollectorSelenium as ZenCollector
-        except ImportError:
-            try:
-                from collectors.zen_collector import ZenCollector
-            except ImportError:
-                ZenCollector = None
+        ZenCollector = None
+        logger.warning("[MONITOR] Коллектор Дзена недоступен")
     
 try:
-    from collectors.ok_api_collector import OKAPICollector as OKCollector
+    from collectors.ok_selenium_collector import OKSeleniumCollector as OKCollector
+    logger.info("[MONITOR] Используется OK Selenium коллектор (обход ограничений API)")
 except ImportError:
     try:
-        from collectors.ok_collector import OKCollector
+        from collectors.ok_api_collector import OKAPICollector as OKCollector
+        logger.warning("[MONITOR] Используется OK API коллектор (ограниченный)")
     except ImportError:
-        OKCollector = None
+        try:
+            from collectors.ok_collector import OKCollector
+        except ImportError:
+            OKCollector = None
+            logger.warning("[MONITOR] OK коллектор недоступен")
 from analyzers.sentiment_analyzer import SentimentAnalyzer
 from analyzers.moderator import Moderator
 from analyzers.dostoevsky_analyzer import DostoevskyAnalyzer

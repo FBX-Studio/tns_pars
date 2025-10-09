@@ -1,6 +1,16 @@
 """
 Запуск единоразового сбора данных БЕЗ прокси (быстрее)
 """
+import logging
+from datetime import datetime
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 from models import db, Review, MonitoringLog
 from collectors.vk_collector import VKCollector
 try:
@@ -12,28 +22,30 @@ try:
 except ImportError:
     from collectors.web_collector import WebCollector as NewsCollector
 try:
-    from collectors.zen_collector import ZenCollector
-except ImportError:
-    ZenCollector = None
-try:
-    from collectors.ok_api_collector import OKAPICollector
+    from collectors.zen_selenium_collector import ZenSeleniumCollector
+    ZenCollector = ZenSeleniumCollector  # Используем Selenium для обхода капчи
 except ImportError:
     try:
-        from collectors.ok_collector import OKCollector as OKAPICollector
+        from collectors.zen_collector import ZenCollector
     except ImportError:
-        OKAPICollector = None
+        ZenCollector = None
+try:
+    from collectors.ok_selenium_collector import OKSeleniumCollector as OKAPICollector
+    logger.info("OK Selenium коллектор доступен (обход ограничений API)")
+except ImportError:
+    try:
+        from collectors.ok_api_collector import OKAPICollector
+        logger.warning("Используется OK API коллектор (ограниченный)")
+    except ImportError:
+        try:
+            from collectors.ok_collector import OKCollector as OKAPICollector
+        except ImportError:
+            OKAPICollector = None
+            logger.warning("OK коллектор недоступен")
 from analyzers.sentiment_analyzer import SentimentAnalyzer
 from analyzers.moderator import Moderator
 from config import Config
 from app import app
-from datetime import datetime
-import logging
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
 
 # Отключаем прокси для быстроты
 Config.USE_FREE_PROXIES = 'False'
@@ -95,9 +107,10 @@ def collect_once():
     except Exception as e:
         logger.error(f"✗ Ошибка новостей: {e}")
     
-    # 4. Яндекс.Дзен
+    # 4. Яндекс.Дзен (через Selenium для обхода капчи)
     if zen_collector:
-        logger.info("\n4️⃣ Сбор из Яндекс.Дзен...")
+        logger.info("\n4️⃣ Сбор из Яндекс.Дзен (Selenium - обход капчи)...")
+        logger.info("   Это займет 2-3 минуты...")
         try:
             zen_posts = zen_collector.collect()
             logger.info(f"✓ Дзен: найдено {len(zen_posts)} статей")
