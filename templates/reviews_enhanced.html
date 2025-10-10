@@ -166,6 +166,15 @@
             border-color: #0052a5;
             box-shadow: 0 0 0 3px rgba(0, 82, 165, 0.1);
         }
+
+        .comment-tag {
+            background: #fff4e6;
+            color: #b05d00;
+            padding: 0.25rem 0.7rem;
+            border-radius: 15px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
         
         /* Buttons */
         .btn {
@@ -400,6 +409,15 @@
                         <label>Поиск</label>
                         <input type="text" name="search" placeholder="Поиск по тексту..." value="{{ search }}">
                     </div>
+
+                    <div class="filter-group">
+                        <label>Тип записи</label>
+                        <select name="kind">
+                            <option value="all" {% if kind == 'all' %}selected{% endif %}>Все</option>
+                            <option value="posts" {% if kind == 'posts' %}selected{% endif %}>Только публикации</option>
+                            <option value="comments" {% if kind == 'comments' %}selected{% endif %}>Только комментарии</option>
+                        </select>
+                    </div>
                 </div>
                 
                 <div style="display: flex; gap: 1rem;">
@@ -420,6 +438,9 @@
                     <div class="review-header">
                         <div class="review-meta">
                             <span class="source-badge">{{ review.source.upper() }}</span>
+                            {% if review.is_comment %}
+                            <span class="comment-tag">💬 Комментарий</span>
+                            {% endif %}
                             <span>📅 {{ review.collected_date.strftime('%d.%m.%Y %H:%M') if review.collected_date else '-' }}</span>
                             <span>👤 {{ review.author or 'Неизвестно' }}</span>
                         </div>
@@ -455,7 +476,7 @@
                 
                 <div class="pagination">
                     {% if pagination.has_prev %}
-                        <a href="{{ url_for('reviews_list', page=pagination.prev_num, source=source, sentiment=sentiment, time=time_filter, search=search) }}" class="btn btn-primary">
+                        <a href="{{ url_for('reviews_list', page=pagination.prev_num, source=source, sentiment=sentiment, time=time_filter, search=search, kind=kind) }}" class="btn btn-primary">
                             ← Назад
                         </a>
                     {% endif %}
@@ -465,7 +486,7 @@
                     </span>
                     
                     {% if pagination.has_next %}
-                        <a href="{{ url_for('reviews_list', page=pagination.next_num, source=source, sentiment=sentiment, time=time_filter, search=search) }}" class="btn btn-primary">
+                        <a href="{{ url_for('reviews_list', page=pagination.next_num, source=source, sentiment=sentiment, time=time_filter, search=search, kind=kind) }}" class="btn btn-primary">
                             Вперед →
                         </a>
                     {% endif %}

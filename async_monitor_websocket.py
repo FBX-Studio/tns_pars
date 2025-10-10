@@ -13,13 +13,7 @@ try:
     from collectors.telegram_user_collector import TelegramUserCollector as TelegramCollector
 except ImportError:
     from collectors.telegram_collector import TelegramCollector
-try:
-    from collectors.news_collector_light import NewsCollectorLight as NewsCollector
-except ImportError:
-    try:
-        from collectors.news_collector import NewsCollector
-    except ImportError:
-        from collectors.web_collector import WebCollector as NewsCollector
+from collectors.news_collector import NewsCollector
 
 # Новые коллекторы - используем Selenium для Дзена (обход капчи)
 try:
@@ -156,7 +150,7 @@ class AsyncReviewMonitorWebSocket:
         self.socketio.emit('monitoring_progress', progress_data)
         logger.info(f"[{source.upper()}] {stage}: {message}")
     
-    async def collect_from_source_async(self, source_name, collector):
+    async def collect_from_source_async(self, source_name, collect_callable):
         """Асинхронный сбор с отправкой прогресса"""
         log = None
         log_id = None
@@ -179,7 +173,7 @@ class AsyncReviewMonitorWebSocket:
             })
             
             loop = asyncio.get_event_loop()
-            reviews = await loop.run_in_executor(None, collector.collect)
+            reviews = await loop.run_in_executor(None, collect_callable)
             
             # Фильтрация по периоду, если указан
             if self.since_date:
@@ -325,17 +319,25 @@ class AsyncReviewMonitorWebSocket:
         
         self.is_running = True
         
+        def call_with_comments(collector):
+            def _call():
+                try:
+                    return collector.collect(collect_comments=True)
+                except TypeError:
+                    return collector.collect()
+            return _call
+
         tasks = [
-            self.collect_from_source_async('vk', self.vk_collector),
-            self.collect_from_source_async('telegram', self.telegram_collector),
-            self.collect_from_source_async('news', self.news_collector),
+            self.collect_from_source_async('vk', lambda: self.vk_collector.collect()),
+            self.collect_from_source_async('telegram', call_with_comments(self.telegram_collector)),
+            self.collect_from_source_async('news', lambda: self.news_collector.collect_with_comments()),
         ]
-        
+
         # Добавляем новые коллекторы если доступны
         if self.zen_collector:
-            tasks.append(self.collect_from_source_async('zen', self.zen_collector))
+            tasks.append(self.collect_from_source_async('zen', call_with_comments(self.zen_collector)))
         if self.ok_collector:
-            tasks.append(self.collect_from_source_async('ok', self.ok_collector))
+            tasks.append(self.collect_from_source_async('ok', call_with_comments(self.ok_collector)))
         
         results = await asyncio.gather(*tasks, return_exceptions=True)
         

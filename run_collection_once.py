@@ -45,7 +45,7 @@ except ImportError:
 from analyzers.sentiment_analyzer import SentimentAnalyzer
 from analyzers.moderator import Moderator
 from config import Config
-from app import app
+from app_enhanced import app
 
 # Отключаем прокси для быстроты
 Config.USE_FREE_PROXIES = 'False'
@@ -56,6 +56,7 @@ def collect_once():
     logger.info("=" * 70)
     logger.info("ЗАПУСК ЕДИНОРАЗОВОГО СБОРА ДАННЫХ (БЕЗ ПРОКСИ)")
     logger.info("=" * 70)
+    logger.info("Комментарии и ответы собираются автоматически")
     
     vk_collector = VKCollector()
     telegram_collector = TelegramCollector()
@@ -82,11 +83,9 @@ def collect_once():
         logger.error(f"✗ Ошибка VK: {e}")
     
     # 2. Telegram
-    logger.info("\n2️⃣ Сбор из Telegram...")
-    logger.info("   (для комментариев добавьте collect_comments=True)")
+    logger.info("\n2️⃣ Сбор из Telegram (с комментариями)...")
     try:
-        # Для парсинга комментариев используйте: telegram_collector.collect(collect_comments=True)
-        tg_reviews = telegram_collector.collect(collect_comments=False)
+        tg_reviews = telegram_collector.collect(collect_comments=True)
         messages = [r for r in tg_reviews if not r.get('is_comment', False)]
         comments = [r for r in tg_reviews if r.get('is_comment', False)]
         logger.info(f"✓ Telegram: найдено {len(messages)} сообщений, {len(comments)} комментариев")
@@ -95,11 +94,9 @@ def collect_once():
         logger.error(f"✗ Ошибка Telegram: {e}")
     
     # 3. Новости
-    logger.info("\n3️⃣ Сбор новостей (БЕЗ прокси)...")
-    logger.info("   (для комментариев используйте news_collector.collect_with_comments())")
+    logger.info("\n3️⃣ Сбор новостей (БЕЗ прокси, с комментариями)...")
     try:
-        # Для парсинга комментариев используйте: news = news_collector.collect_with_comments()
-        news = news_collector.collect()
+        news = news_collector.collect_with_comments()
         articles = [r for r in news if not r.get('is_comment', False)]
         comments = [r for r in news if r.get('is_comment', False)]
         logger.info(f"✓ Новости: найдено {len(articles)} статей, {len(comments)} комментариев")
@@ -112,8 +109,10 @@ def collect_once():
         logger.info("\n4️⃣ Сбор из Яндекс.Дзен (Selenium - обход капчи)...")
         logger.info("   Это займет 2-3 минуты...")
         try:
-            zen_posts = zen_collector.collect()
-            logger.info(f"✓ Дзен: найдено {len(zen_posts)} статей")
+            zen_posts = zen_collector.collect(collect_comments=True)
+            articles = [r for r in zen_posts if not r.get('is_comment', False)]
+            comments = [r for r in zen_posts if r.get('is_comment', False)]
+            logger.info(f"✓ Дзен: найдено {len(articles)} статей, {len(comments)} комментариев")
             all_reviews.extend(zen_posts)
         except Exception as e:
             logger.error(f"✗ Ошибка Дзен: {e}")

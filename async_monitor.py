@@ -10,13 +10,7 @@ try:
     from collectors.telegram_user_collector import TelegramUserCollector as TelegramCollector
 except ImportError:
     from collectors.telegram_collector import TelegramCollector
-try:
-    from collectors.news_collector_light import NewsCollectorLight as NewsCollector
-except ImportError:
-    try:
-        from collectors.news_collector import NewsCollector
-    except ImportError:
-        from collectors.web_collector import WebCollector as NewsCollector
+from collectors.news_collector import NewsCollector
 from analyzers.sentiment_analyzer import SentimentAnalyzer
 from analyzers.moderator import Moderator
 from config import Config
@@ -31,14 +25,14 @@ logger = logging.getLogger(__name__)
 
 class AsyncReviewMonitor:
     def __init__(self):
+        self.sentiment_analyzer = SentimentAnalyzer()
         self.vk_collector = VKCollector()
         self.telegram_collector = TelegramCollector()
-        self.news_collector = NewsCollector()
-        self.sentiment_analyzer = SentimentAnalyzer()
+        self.news_collector = NewsCollector(sentiment_analyzer=self.sentiment_analyzer)
         self.moderator = Moderator()
         self.is_running = False
     
-    async def collect_from_source_async(self, source_name, collector):
+    async def collect_from_source_async(self, source_name, collect_callable):
         """Асинхронный сбор отзывов из одного источника"""
         log = None
         log_id = None
@@ -60,7 +54,7 @@ class AsyncReviewMonitor:
             logger.info(f"[{source_name.upper()}] ЭТАП 2/4: Сбор данных из источника...")
             
             loop = asyncio.get_event_loop()
-            reviews = await loop.run_in_executor(None, collector.collect)
+            reviews = await loop.run_in_executor(None, collect_callable)
             
             logger.info(f"[{source_name.upper()}] ✓ Получено записей: {len(reviews)}")
             logger.info(f"")
@@ -179,10 +173,18 @@ class AsyncReviewMonitor:
         
         self.is_running = True
         
+        def call_with_comments(collector):
+            def _call():
+                try:
+                    return collector.collect(collect_comments=True)
+                except TypeError:
+                    return collector.collect()
+            return _call
+
         tasks = [
-            self.collect_from_source_async('vk', self.vk_collector),
-            self.collect_from_source_async('telegram', self.telegram_collector),
-            self.collect_from_source_async('news', self.news_collector),
+            self.collect_from_source_async('vk', lambda: self.vk_collector.collect()),
+            self.collect_from_source_async('telegram', call_with_comments(self.telegram_collector)),
+            self.collect_from_source_async('news', lambda: self.news_collector.collect_with_comments()),
         ]
         
         logger.info("⚡ Сбор данных начат одновременно из всех источников...")

@@ -124,6 +124,23 @@ class ProxyManager:
             'http': f'http://{proxy}',
             'https': f'http://{proxy}'
         }
+    
+    def remove_proxy(self, proxy: dict) -> None:
+        """Удалить нерабочий прокси из списка"""
+        if not proxy:
+            return
+        
+        # Извлекаем адрес прокси из словаря
+        proxy_addr = None
+        if isinstance(proxy, dict):
+            if 'http' in proxy:
+                proxy_addr = proxy['http'].replace('http://', '').replace('https://', '')
+            elif 'https' in proxy:
+                proxy_addr = proxy['https'].replace('http://', '').replace('https://', '')
+        
+        if proxy_addr and proxy_addr in self.proxies:
+            self.proxies.remove(proxy_addr)
+            logger.debug(f"[PROXY] Removed non-working proxy: {proxy_addr}")
 
 
 # Глобальный менеджер прокси

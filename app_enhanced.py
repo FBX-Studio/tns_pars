@@ -96,6 +96,7 @@ def reviews_list():
     sentiment = request.args.get('sentiment', '')
     time_filter = request.args.get('time', 'all')
     search = request.args.get('search', '')
+    kind = request.args.get('kind', 'all')
     
     query = Review.query
     
@@ -106,6 +107,12 @@ def reviews_list():
     # Фильтр по тональности
     if sentiment:
         query = query.filter_by(sentiment_label=sentiment)
+
+    # Фильтр по типу записи
+    if kind == 'comments':
+        query = query.filter(Review.is_comment.is_(True))
+    elif kind == 'posts':
+        query = query.filter((Review.is_comment.is_(False)) | (Review.is_comment.is_(None)))
     
     # Фильтр по времени
     now = datetime.utcnow()
@@ -133,7 +140,8 @@ def reviews_list():
                          source=source,
                          sentiment=sentiment,
                          time_filter=time_filter,
-                         search=search)
+                         search=search,
+                         kind=kind)
 
 # ==================== МОНИТОРИНГ ====================
 @app.route('/monitoring')

@@ -57,7 +57,7 @@ def main():
     # Parse arguments
     parser = argparse.ArgumentParser(description='Сбор данных из всех источников')
     parser.add_argument('--comments', action='store_true', 
-                       help='Включить парсинг комментариев (медленнее)')
+                       help='[Устарело] Комментарии теперь собираются всегда')
     parser.add_argument('--no-vk', action='store_true', help='Пропустить VK')
     parser.add_argument('--no-telegram', action='store_true', help='Пропустить Telegram')
     parser.add_argument('--no-news', action='store_true', help='Пропустить новости')
@@ -71,8 +71,11 @@ def main():
     
     logger.info("\n" + "=" * 70)
     logger.info("ФИНАЛЬНЫЙ СБОР ДАННЫХ ИЗ ВСЕХ ИСТОЧНИКОВ")
+    collect_comments = True
     if args.comments:
-        logger.info("Режим: С ПАРСИНГОМ КОММЕНТАРИЕВ")
+        logger.info("Флаг --comments устарел: комментарии собираются по умолчанию")
+    if collect_comments:
+        logger.info("Режим: С ПАРСИНГОМ КОММЕНТАРИЕВ (всегда включено)")
     logger.info("=" * 70)
     
     # Проверка Telegram API
@@ -124,17 +127,15 @@ def main():
     if not args.no_telegram:
         logger.info("\n" + "=" * 70)
         logger.info("2️⃣  СБОР ИЗ TELEGRAM")
-        if args.comments:
-            logger.info("(с комментариями/ответами)")
+        logger.info("(с комментариями/ответами)")
         logger.info("=" * 70)
         logger.info("Каналы: @moynizhny, @bez_cenz_nn, @today_nn, @nizhniy_smi, @nn52signal")
         try:
-            tg_reviews = telegram_collector.collect(collect_comments=args.comments)
+            tg_reviews = telegram_collector.collect(collect_comments=collect_comments)
             messages = [r for r in tg_reviews if not r.get('is_comment', False)]
             comments = [r for r in tg_reviews if r.get('is_comment', False)]
             logger.info(f"✓ Telegram: найдено {len(messages)} сообщений")
-            if args.comments:
-                logger.info(f"✓ Telegram: найдено {len(comments)} ответов")
+            logger.info(f"✓ Telegram: найдено {len(comments)} ответов")
             all_reviews.extend(tg_reviews)
         except Exception as e:
             logger.error(f"✗ Ошибка Telegram: {e}")
@@ -145,19 +146,14 @@ def main():
     if not args.no_news:
         logger.info("\n" + "=" * 70)
         logger.info("3️⃣  СБОР НОВОСТЕЙ (Google News)")
-        if args.comments:
-            logger.info("(с комментариями)")
+        logger.info("(с комментариями)")
         logger.info("=" * 70)
         try:
-            if args.comments:
-                news = news_collector.collect_with_comments()
-                articles = [r for r in news if not r.get('is_comment', False)]
-                comments = [r for r in news if r.get('is_comment', False)]
-                logger.info(f"✓ Новости: найдено {len(articles)} статей")
-                logger.info(f"✓ Новости: найдено {len(comments)} комментариев")
-            else:
-                news = news_collector.collect()
-                logger.info(f"✓ Новости: найдено {len(news)} статей")
+            news = news_collector.collect_with_comments()
+            articles = [r for r in news if not r.get('is_comment', False)]
+            comments = [r for r in news if r.get('is_comment', False)]
+            logger.info(f"✓ Новости: найдено {len(articles)} статей")
+            logger.info(f"✓ Новости: найдено {len(comments)} комментариев")
             all_reviews.extend(news)
         except Exception as e:
             logger.error(f"✗ Ошибка новостей: {e}")
@@ -166,16 +162,14 @@ def main():
     if not args.no_zen:
         logger.info("\n" + "=" * 70)
         logger.info("4️⃣  СБОР ИЗ ЯНДЕКС.ДЗЕН")
-        if args.comments:
-            logger.info("(с комментариями)")
+        logger.info("(с комментариями)")
         logger.info("=" * 70)
         try:
-            zen = zen_collector.collect(collect_comments=args.comments)
+            zen = zen_collector.collect(collect_comments=collect_comments)
             articles = [r for r in zen if not r.get('is_comment', False)]
             comments = [r for r in zen if r.get('is_comment', False)]
             logger.info(f"✓ Дзен: найдено {len(articles)} статей")
-            if args.comments:
-                logger.info(f"✓ Дзен: найдено {len(comments)} комментариев")
+            logger.info(f"✓ Дзен: найдено {len(comments)} комментариев")
             all_reviews.extend(zen)
         except Exception as e:
             logger.error(f"✗ Ошибка Дзен: {e}")
@@ -292,8 +286,7 @@ def main():
         logger.info(f"   Позитивные: {positive}")
         logger.info(f"   Негативные: {negative}")
         logger.info(f"   Нейтральные: {neutral}")
-        logger.info("\n💡 Для сбора с комментариями используйте:")
-        logger.info("   python final_collection.py --comments")
+        logger.info("\n💡 Комментарии и ответы собираются автоматически при каждом запуске")
         logger.info("\n✓ Сбор завершен! Откройте веб-интерфейс:")
         logger.info("   python app.py")
         logger.info("   http://localhost:5000")

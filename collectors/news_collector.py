@@ -11,15 +11,10 @@ from utils.proxy_manager import ProxyManager
 import logging
 import time
 import xml.etree.ElementTree as ET
-from urllib.parse import urljoin, urlparse
-
-try:
-    import feedparser
-    HAS_FEEDPARSER = True
-except Exception as e:
-    logger = logging.getLogger(__name__)
-    logger.warning(f"feedparser not available: {e}, using BeautifulSoup for RSS")
-    HAS_FEEDPARSER = False
+from urllib.parse import urljoin, urlparse, quote
+import warnings
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 logger = logging.getLogger(__name__)
 
@@ -38,80 +33,33 @@ class NewsCollector:
             'Connection': 'keep-alive',
         }
         
-        # Настройка прокси
-        self.use_free_proxies = Config.get('USE_FREE_PROXIES', 'True').lower() == 'true'
-        self.proxy_manager = ProxyManager() if self.use_free_proxies else None
+        # Отключаем прокси для новостей - они блокируют
+        self.use_free_proxies = False
+        self.proxy_manager = None
         self.current_proxy = None
         
-        if not self.use_free_proxies:
-            self.current_proxy = self._setup_static_proxy()
+        # Рабочие RSS feeds
+        self.rss_feeds = []
         
-        # RSS feeds для новостей Нижнего Новгорода
-        self.rss_feeds = [
-            'https://nn.ru/rss.xml',
-            'https://www.nn52.ru/rss',
-            'https://www.niann.ru/rss/',
-        ]
-        
-        # Поисковые запросы для Google News
+        # Поисковые запросы для Google News (работает!)
         self.search_queries = [
             'ТНС энерго Нижний Новгород',
             'энергосбыт Нижний Новгород',
             'ТНС энерго НН отзывы'
         ]
     
-    def _setup_static_proxy(self):
-        """Setup static proxy from config"""
-        proxies = {}
-        
-        use_tor = Config.get('USE_TOR', '').lower() == 'true'
-        if use_tor:
-            tor_proxy = Config.get('TOR_PROXY', 'socks5h://127.0.0.1:9050')
-            proxies['http'] = tor_proxy
-            proxies['https'] = tor_proxy
-            logger.info(f"Using Tor proxy: {tor_proxy}")
-            return proxies
-        
-        socks_proxy = Config.get('SOCKS_PROXY', '')
-        if socks_proxy:
-            proxies['http'] = socks_proxy
-            proxies['https'] = socks_proxy
-            logger.info(f"Using SOCKS proxy: {socks_proxy}")
-            return proxies
-        
-        http_proxy = Config.get('HTTP_PROXY', '')
-        https_proxy = Config.get('HTTPS_PROXY', '')
-        
-        if http_proxy:
-            proxies['http'] = http_proxy
-        if https_proxy:
-            proxies['https'] = https_proxy
-        
-        return proxies if proxies else None
-    
-    def _get_proxy(self):
-        """Get proxy for request"""
-        if self.use_free_proxies and self.proxy_manager:
-            proxy = self.proxy_manager.get_random_proxy()
-            if proxy:
-                return proxy
-            logger.warning("No free proxies available")
-        return self.current_proxy
-    
-    def _request_with_retry(self, url, max_retries=2, timeout=10):
-        """Make HTTP request with retry and proxy rotation"""
+    def _request_with_retry(self, url, max_retries=2, timeout=15):
+        """Make HTTP request with retry"""
         last_exception = None
         
         for attempt in range(max_retries):
             try:
-                proxy = self._get_proxy()
-                
                 response = requests.get(
                     url, 
-                    headers=self.headers, 
-                    proxies=proxy, 
+                    headers=self.headers,
                     timeout=timeout,
-                    allow_redirects=True
+                    allow_redirects=True,
+                    verify=False  # Игнорировать SSL для RSS
                 )
                 response.raise_for_status()
                 return response
@@ -120,13 +68,16 @@ class NewsCollector:
                 last_exception = e
                 logger.warning(f"Request failed (attempt {attempt + 1}/{max_retries}): {e}")
                 
-                if self.use_free_proxies and proxy and self.proxy_manager:
-                    self.proxy_manager.remove_proxy(proxy)
-                
                 if attempt < max_retries - 1:
                     time.sleep(1)
         
         raise last_exception
+    
+    def _company_keywords(self):
+        patterns = [kw.lower() for kw in getattr(Config, 'COMPANY_KEYWORDS', []) if kw]
+        if not patterns:
+            patterns = ['тнс энерго', 'тнс энерго нн', 'тнс нн', 'энергосбыт']
+        return patterns
     
     def _is_relevant(self, text):
         """Check if text is relevant to company"""
@@ -135,26 +86,23 @@ class NewsCollector:
         
         text_lower = text.lower()
         
-        # Исключения
+        # Исключаем нерелевантное
         exclude_patterns = [
             'газпром', 'т плюс', 'т-плюс', 'росатом',
             'тнс тула', 'тнс великий новгород', 'тнс ярославль',
             'вакансия', 'вакансии', 'требуется', 'резюме'
         ]
-        
         if any(exclude in text_lower for exclude in exclude_patterns):
             return False
         
-        # Ключевые паттерны
-        main_patterns = [
-            'тнс энерго нн',
-            'тнс энерго нижний',
-            'тнс энерго нижегородск',
-            'тнс нн',
-            'тнс нижний новгород'
-        ]
+        # Проверяем ключевые слова компании
+        company_match = any(pattern in text_lower for pattern in self._company_keywords())
+        if not company_match:
+            # Дополнительные паттерны
+            fallback_patterns = ['тнс', 'энерго', 'энергосбыт', 'электроэнерг', 'свет отключ']
+            company_match = any(pattern in text_lower for pattern in fallback_patterns)
         
-        return any(pattern in text_lower for pattern in main_patterns)
+        return company_match
     
     def _is_russian(self, text):
         """Check if text is in Russian"""
@@ -168,44 +116,64 @@ class NewsCollector:
             return True
         
         text_lower = text.lower()
-        return any(keyword.lower() in text_lower for keyword in Config.GEO_KEYWORDS)
+        geo_match = any(keyword.lower() in text_lower for keyword in Config.GEO_KEYWORDS)
+        if geo_match:
+            return True
+        # Комбинированные токены
+        combined_tokens = ['тнс энерго нн', 'тнсэнерго нн', 'энергосбыт нн', 'нижний', 'нижегородск']
+        return any(token in text_lower for token in combined_tokens)
     
-    def collect_from_rss(self, feed_url):
-        """Collect news from RSS feed"""
+    def search_google_news(self, query):
+        """Search Google News через RSS (работает!)"""
         articles = []
         
         try:
-            logger.info(f"Parsing RSS feed: {feed_url}")
+            # URL-кодируем запрос
+            encoded_query = quote(f"{query} Нижний Новгород")
+            search_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ru&gl=RU&ceid=RU:ru"
             
-            if HAS_FEEDPARSER:
-                # Используем feedparser если доступен
-                feed = feedparser.parse(feed_url)
-                
-                for entry in feed.entries[:50]:
-                    title = entry.get('title', '')
-                    description = entry.get('description', '') or entry.get('summary', '')
-                    link = entry.get('link', '')
+            logger.info(f"Searching Google News: {query}")
+            
+            response = self._request_with_retry(search_url, timeout=10)
+            
+            # Парсим XML
+            soup = BeautifulSoup(response.content, 'xml')
+            if not soup.find_all('item'):
+                soup = BeautifulSoup(response.content, 'html.parser')
+            
+            items = soup.find_all('item')[:20]  # Берем больше новостей
+            
+            for item in items:
+                try:
+                    title_tag = item.find('title')
+                    desc_tag = item.find('description')
+                    link_tag = item.find('link')
+                    pub_date_tag = item.find('pubDate')
+                    
+                    title = title_tag.get_text(strip=True) if title_tag else ''
+                    description = desc_tag.get_text(strip=True) if desc_tag else ''
+                    link = link_tag.get_text(strip=True) if link_tag else ''
                     
                     full_text = f"{title} {description}"
                     
                     if not self._is_relevant(full_text):
                         continue
+                    
                     if not self._is_nizhny_region(full_text):
-                        continue
-                    if not self._is_russian(full_text):
                         continue
                     
                     published_date = datetime.now()
-                    if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                    if pub_date_tag:
                         try:
-                            published_date = datetime(*entry.published_parsed[:6])
+                            from email.utils import parsedate_to_datetime
+                            published_date = parsedate_to_datetime(pub_date_tag.get_text(strip=True))
                         except:
                             pass
                     
                     article = {
-                        'source_id': f"rss_{hash(link)}",
-                        'author': urlparse(feed_url).netloc,
-                        'author_id': urlparse(feed_url).netloc,
+                        'source_id': f"google_news_{hash(link)}",
+                        'author': 'Google News',
+                        'author_id': 'google_news',
                         'text': f"{title}\n\n{description[:500]}",
                         'url': link,
                         'published_date': published_date,
@@ -219,12 +187,37 @@ class NewsCollector:
                         article['sentiment_label'] = sentiment['sentiment_label']
                     
                     articles.append(article)
-            else:
-                # Альтернативный парсинг через BeautifulSoup
-                response = self._request_with_retry(feed_url)
-                soup = BeautifulSoup(response.content, 'xml') or BeautifulSoup(response.content, 'html.parser')
-                
-                for item in soup.find_all('item')[:50]:
+                    logger.debug(f"Found relevant article: {title[:50]}...")
+                    
+                except Exception as e:
+                    logger.debug(f"Error parsing article: {e}")
+                    continue
+            
+            logger.info(f"Found {len(articles)} articles from Google News for '{query}'")
+            
+        except Exception as e:
+            logger.error(f"Error searching Google News: {e}")
+        
+        return articles
+    
+    def collect_from_newsnn(self):
+        """Collect from NewsNN RSS (работает!)"""
+        articles = []
+        
+        try:
+            feed_url = 'https://newsnn.ru/rss/'
+            logger.info(f"Parsing NewsNN RSS feed")
+            
+            response = self._request_with_retry(feed_url, timeout=10)
+            
+            soup = BeautifulSoup(response.content, 'xml')
+            if not soup.find_all('item'):
+                soup = BeautifulSoup(response.content, 'html.parser')
+            
+            items = soup.find_all('item')[:50]  # Берем больше для фильтрации
+            
+            for item in items:
+                try:
                     title_tag = item.find('title')
                     desc_tag = item.find('description')
                     link_tag = item.find('link')
@@ -235,17 +228,17 @@ class NewsCollector:
                     
                     full_text = f"{title} {description}"
                     
+                    # Проверяем релевантность
                     if not self._is_relevant(full_text):
                         continue
-                    if not self._is_nizhny_region(full_text):
-                        continue
+                    
                     if not self._is_russian(full_text):
                         continue
                     
                     article = {
-                        'source_id': f"rss_{hash(link)}",
-                        'author': urlparse(feed_url).netloc,
-                        'author_id': urlparse(feed_url).netloc,
+                        'source_id': f"newsnn_{hash(link)}",
+                        'author': 'NewsNN',
+                        'author_id': 'newsnn.ru',
                         'text': f"{title}\n\n{description[:500]}",
                         'url': link,
                         'published_date': datetime.now(),
@@ -259,153 +252,16 @@ class NewsCollector:
                         article['sentiment_label'] = sentiment['sentiment_label']
                     
                     articles.append(article)
-            
-            logger.info(f"Found {len(articles)} relevant articles from {feed_url}")
-            
-        except Exception as e:
-            logger.error(f"Error parsing RSS {feed_url}: {e}")
-        
-        return articles
-    
-    def search_google_news(self, query):
-        """Search Google News (через RSS)"""
-        articles = []
-        
-        try:
-            search_url = f"https://news.google.com/rss/search?q={query}+Нижний+Новгород&hl=ru&gl=RU&ceid=RU:ru"
-            
-            logger.info(f"Searching Google News: {query}")
-            
-            if HAS_FEEDPARSER:
-                feed = feedparser.parse(search_url)
-                
-                for entry in feed.entries[:20]:
-                    title = entry.get('title', '')
-                    description = entry.get('description', '') or entry.get('summary', '')
-                    link = entry.get('link', '')
+                    logger.debug(f"Found relevant NewsNN article: {title[:50]}...")
                     
-                    full_text = f"{title} {description}"
-                    
-                    if not self._is_relevant(full_text):
-                        continue
-                    
-                    published_date = datetime.now()
-                    if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                        try:
-                            published_date = datetime(*entry.published_parsed[:6])
-                        except:
-                            pass
-                    
-                    article = {
-                        'source_id': f"google_news_{hash(link)}",
-                        'author': 'Google News',
-                        'author_id': 'google_news',
-                        'text': f"{title}\n\n{description[:500]}",
-                        'url': link,
-                        'published_date': published_date,
-                        'source': 'news'
-                    }
-                    
-                    # Анализ тональности
-                    if self.sentiment_analyzer:
-                        sentiment = self.sentiment_analyzer.analyze(article['text'])
-                        article['sentiment_score'] = sentiment['sentiment_score']
-                        article['sentiment_label'] = sentiment['sentiment_label']
-                    
-                    articles.append(article)
-            else:
-                # Альтернативный парсинг
-                response = self._request_with_retry(search_url)
-                soup = BeautifulSoup(response.content, 'xml') or BeautifulSoup(response.content, 'html.parser')
-                
-                for item in soup.find_all('item')[:20]:
-                    title_tag = item.find('title')
-                    link_tag = item.find('link')
-                    
-                    title = title_tag.get_text(strip=True) if title_tag else ''
-                    link = link_tag.get_text(strip=True) if link_tag else ''
-                    
-                    if not self._is_relevant(title):
-                        continue
-                    
-                    article = {
-                        'source_id': f"google_news_{hash(link)}",
-                        'author': 'Google News',
-                        'author_id': 'google_news',
-                        'text': title,
-                        'url': link,
-                        'published_date': datetime.now(),
-                        'source': 'news'
-                    }
-                    
-                    # Анализ тональности
-                    if self.sentiment_analyzer:
-                        sentiment = self.sentiment_analyzer.analyze(article['text'])
-                        article['sentiment_score'] = sentiment['sentiment_score']
-                        article['sentiment_label'] = sentiment['sentiment_label']
-                    
-                    articles.append(article)
-            
-            logger.info(f"Found {len(articles)} articles from Google News for '{query}'")
-            
-        except Exception as e:
-            logger.error(f"Error searching Google News: {e}")
-        
-        return articles
-    
-    def search_yandex_news_rss(self, query):
-        """Search Yandex News через RSS (бесплатный)"""
-        articles = []
-        
-        try:
-            # Yandex News RSS (бесплатный)
-            search_url = f"https://news.yandex.ru/yandsearch?cl4url=&lang=ru&lr=47&rpt=nnews2&text={query}"
-            
-            logger.info(f"Searching Yandex News: {query}")
-            
-            response = self._request_with_retry(search_url)
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Парсим результаты Yandex News
-            for item in soup.find_all('div', class_='story')[:20]:
-                title_tag = item.find('h2', class_='story__title')
-                link_tag = item.find('a', class_='story__title-link')
-                text_tag = item.find('div', class_='story__text')
-                
-                if not title_tag or not link_tag:
+                except Exception as e:
+                    logger.debug(f"Error parsing NewsNN article: {e}")
                     continue
-                
-                title = title_tag.get_text(strip=True)
-                link = link_tag.get('href', '')
-                description = text_tag.get_text(strip=True) if text_tag else ''
-                
-                full_text = f"{title} {description}"
-                
-                if not self._is_relevant(full_text):
-                    continue
-                
-                article = {
-                    'source_id': f"yandex_news_{hash(link)}",
-                    'author': 'Yandex News',
-                    'author_id': 'yandex_news',
-                    'text': f"{title}\n\n{description[:500]}",
-                    'url': link,
-                    'published_date': datetime.now(),
-                    'source': 'news'
-                }
-                
-                # Анализ тональности
-                if self.sentiment_analyzer:
-                    sentiment = self.sentiment_analyzer.analyze(article['text'])
-                    article['sentiment_score'] = sentiment['sentiment_score']
-                    article['sentiment_label'] = sentiment['sentiment_label']
-                
-                articles.append(article)
             
-            logger.info(f"Found {len(articles)} articles from Yandex News for '{query}'")
+            logger.info(f"Found {len(articles)} relevant articles from NewsNN")
             
         except Exception as e:
-            logger.error(f"Error searching Yandex News: {e}")
+            logger.error(f"Error parsing NewsNN: {e}")
         
         return articles
     
@@ -416,10 +272,14 @@ class NewsCollector:
         try:
             logger.info(f"Parsing comments from: {article_url}")
             
-            response = self._request_with_retry(article_url, timeout=15)
+            # Пропускаем Google News ссылки - они редиректы
+            if 'news.google.com' in article_url:
+                return comments
+            
+            response = self._request_with_retry(article_url, timeout=10)
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # Попытка найти комментарии по распространенным паттернам
+            # Ищем комментарии
             comment_selectors = [
                 {'class': 'comment'},
                 {'class': 'comment-item'},
@@ -429,17 +289,16 @@ class NewsCollector:
                 {'id': 'comments'},
                 {'class': 'comments'},
                 {'class': 'comment-list'},
-                {'data-type': 'comment'},
             ]
             
             for selector in comment_selectors:
-                comment_elements = soup.find_all('div', selector) or soup.find_all('li', selector) or soup.find_all('article', selector)
+                comment_elements = soup.find_all('div', selector) or soup.find_all('li', selector)
                 
                 if comment_elements:
-                    for elem in comment_elements[:50]:  # Limit to 50 comments per article
+                    for elem in comment_elements[:20]:  # Ограничиваем количество
                         try:
-                            # Extract comment text
-                            text_elem = elem.find(['p', 'div'], class_=lambda x: x and ('text' in x.lower() or 'content' in x.lower() or 'body' in x.lower()))
+                            # Извлекаем текст
+                            text_elem = elem.find(['p', 'div'], class_=lambda x: x and ('text' in x.lower() or 'content' in x.lower()))
                             if not text_elem:
                                 text_elem = elem
                             
@@ -448,25 +307,14 @@ class NewsCollector:
                             if not comment_text or len(comment_text) < 10:
                                 continue
                             
-                            # Extract author
-                            author_elem = elem.find(['span', 'a', 'div'], class_=lambda x: x and ('author' in x.lower() or 'user' in x.lower() or 'name' in x.lower()))
+                            # Извлекаем автора
+                            author_elem = elem.find(['span', 'a', 'div'], class_=lambda x: x and ('author' in x.lower() or 'user' in x.lower()))
                             author = author_elem.get_text(strip=True) if author_elem else 'Anonymous'
                             
-                            # Extract date
-                            date_elem = elem.find(['time', 'span'], class_=lambda x: x and ('date' in x.lower() or 'time' in x.lower()))
-                            published_date = datetime.now()
-                            if date_elem:
-                                try:
-                                    date_text = date_elem.get('datetime') or date_elem.get_text(strip=True)
-                                    # Simple date parsing - can be improved
-                                    published_date = datetime.now()
-                                except:
-                                    pass
-                            
                             comment = {
-                                'text': comment_text,
+                                'text': comment_text[:500],  # Ограничиваем длину
                                 'author': author,
-                                'published_date': published_date,
+                                'published_date': datetime.now(),
                                 'source': 'news_comment',
                                 'url': article_url
                             }
@@ -474,46 +322,54 @@ class NewsCollector:
                             comments.append(comment)
                             
                         except Exception as e:
-                            logger.debug(f"Error parsing individual comment: {e}")
+                            logger.debug(f"Error parsing comment: {e}")
                             continue
                     
                     if comments:
-                        break  # Found comments, no need to try other selectors
+                        break
             
-            logger.info(f"Found {len(comments)} comments for article")
+            if comments:
+                logger.info(f"Found {len(comments)} comments")
             
         except Exception as e:
-            logger.warning(f"Error parsing comments from {article_url}: {e}")
+            logger.debug(f"Error parsing comments from {article_url}: {e}")
         
         return comments
     
     def collect(self):
-        """Main collection method (оптимизированный)"""
+        """Main collection method"""
         all_articles = []
         
         logger.info("=" * 60)
-        logger.info("Starting news collection (fast mode)")
+        logger.info("Starting news collection")
         logger.info("=" * 60)
         
-        # 1. RSS feeds (только первый для скорости)
-        if self.rss_feeds:
+        # 1. Google News (основной источник - работает!)
+        for query in self.search_queries[:2]:  # Берем первые 2 запроса
             try:
-                articles = self.collect_from_rss(self.rss_feeds[0])
+                articles = self.search_google_news(query)
                 all_articles.extend(articles)
+                time.sleep(1)  # Небольшая задержка между запросами
             except Exception as e:
-                logger.error(f"RSS collection failed: {e}")
+                logger.error(f"Google News search failed for '{query}': {e}")
         
-        # 2. Google News (только первый запрос)
-        if self.search_queries:
-            try:
-                articles = self.search_google_news(self.search_queries[0])
-                all_articles.extend(articles)
-            except Exception as e:
-                logger.error(f"Google News collection failed: {e}")
+        # 2. NewsNN RSS (дополнительный источник)
+        try:
+            articles = self.collect_from_newsnn()
+            all_articles.extend(articles)
+        except Exception as e:
+            logger.error(f"NewsNN collection failed: {e}")
         
-        # Yandex News пропускаем для скорости (можно включить позже)
+        # Удаляем дубликаты по URL
+        unique_articles = {}
+        for article in all_articles:
+            url = article.get('url', '')
+            if url and url not in unique_articles:
+                unique_articles[url] = article
         
-        logger.info(f"Total articles collected: {len(all_articles)}")
+        all_articles = list(unique_articles.values())
+        
+        logger.info(f"Total unique articles collected: {len(all_articles)}")
         return all_articles
     
     def collect_with_comments(self):
@@ -526,11 +382,11 @@ class NewsCollector:
         for article in articles:
             all_data.append(article)
             
-            # Parse comments for each article
+            # Парсим комментарии для каждой статьи
             if article.get('url'):
                 comments = self.parse_article_comments(article['url'])
                 
-                # Add article reference to comments
+                # Добавляем ссылку на статью к комментариям
                 for comment in comments:
                     comment['parent_url'] = article['url']
                     comment['parent_source_id'] = article['source_id']
@@ -544,9 +400,6 @@ class NewsCollector:
                         comment['sentiment_label'] = sentiment['sentiment_label']
                 
                 all_data.extend(comments)
-                
-                # Small delay between requests
-                time.sleep(0.5)
         
         logger.info(f"Total items (articles + comments): {len(all_data)}")
         return all_data
