@@ -368,6 +368,122 @@ def handle_status_request():
         state_copy['start_time'] = state_copy['start_time'].isoformat()
     emit('status', state_copy)
 
+# ==================== API ДЛЯ КОММЕНТАРИЕВ ====================
+
+@app.route('/api/post/<int:post_id>/comments')
+def get_post_comments_api(post_id):
+    """Получить комментарии к посту"""
+    try:
+        from utils.comment_helper import CommentHelper
+        
+        limit = int(request.args.get('limit', 100))
+        comments = CommentHelper.get_post_comments(post_id, limit=limit)
+        stats = CommentHelper.get_comment_stats(post_id)
+        
+        return jsonify({
+            'success': True,
+            'post_id': post_id,
+            'count': len(comments),
+            'comments': [c.to_dict() for c in comments],
+            'stats': stats
+        })
+    except Exception as e:
+        logger.error(f"Error getting comments for post {post_id}: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/posts/with-comments')
+def get_posts_with_comments_api():
+    """Получить посты с комментариями"""
+    try:
+        from utils.comment_helper import CommentHelper
+        
+        source = request.args.get('source')
+        limit = int(request.args.get('limit', 50))
+        
+        posts_data = CommentHelper.get_posts_with_comments(source, limit)
+        
+        result = []
+        for item in posts_data:
+            result.append({
+                'post': item['post'].to_dict(),
+                'comments': [c.to_dict() for c in item['comments']],
+                'stats': item['stats']
+            })
+        
+        return jsonify({
+            'success': True,
+            'count': len(result),
+            'posts': result
+        })
+    except Exception as e:
+        logger.error(f"Error getting posts with comments: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/posts/without-comments')
+def get_posts_without_comments_api():
+    """Посты без комментариев (для дополнительного парсинга)"""
+    try:
+        from utils.comment_helper import CommentHelper
+        
+        source = request.args.get('source')
+        limit = int(request.args.get('limit', 100))
+        
+        posts = CommentHelper.get_posts_without_comments(source, limit)
+        
+        return jsonify({
+            'success': True,
+            'count': len(posts),
+            'posts': [p.to_dict() for p in posts]
+        })
+    except Exception as e:
+        logger.error(f"Error getting posts without comments: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/stats/comments')
+def get_comments_stats_api():
+    """Общая статистика комментариев"""
+    try:
+        from utils.comment_helper import CommentHelper
+        
+        total_comments = CommentHelper.get_all_comments_count()
+        total_posts = Review.query.filter_by(is_comment=False).count()
+        
+        # Статистика по источникам
+        sources_stats = db.session.query(
+            Review.source,
+            db.func.count(Review.id).label('count')
+        ).filter_by(is_comment=True).group_by(Review.source).all()
+        
+        # Статистика по тональности комментариев
+        sentiment_stats = db.session.query(
+            Review.sentiment_label,
+            db.func.count(Review.id).label('count')
+        ).filter_by(is_comment=True).group_by(Review.sentiment_label).all()
+        
+        return jsonify({
+            'success': True,
+            'total_comments': total_comments,
+            'total_posts': total_posts,
+            'avg_comments_per_post': round(total_comments / total_posts, 2) if total_posts > 0 else 0,
+            'by_source': {source: count for source, count in sources_stats},
+            'by_sentiment': {label or 'neutral': count for label, count in sentiment_stats}
+        })
+    except Exception as e:
+        logger.error(f"Error getting comments stats: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
 if __name__ == '__main__':
     socketio.run(app, 
                 host=Config.FLASK_HOST, 

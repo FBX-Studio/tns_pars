@@ -1,14 +1,11 @@
 """
 Коллектор для OK.ru через Selenium (обход ограничений API)
 """
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 from datetime import datetime
 from config import Config
+from utils.webdriver_helper import create_edge_driver
 import logging
 import time
 import random
@@ -26,41 +23,14 @@ class OKSeleniumCollector:
         
     def _init_driver(self, headless=True):
         """Инициализация Selenium WebDriver"""
-        try:
-            chrome_options = Options()
-            
-            if headless:
-                chrome_options.add_argument('--headless=new')
-            
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
-            
-            chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
-            chrome_options.add_argument('--window-size=1920,1080')
-            
-            # Отключение загрузки изображений
-            prefs = {'profile.managed_default_content_settings.images': 2}
-            chrome_options.add_experimental_option('prefs', prefs)
-            
-            logger.info("[OK-SELENIUM] Запуск Chrome WebDriver...")
-            
-            # Получаем путь к ChromeDriver
-            driver_path = ChromeDriverManager().install()
-            # Исправляем путь если он указывает на THIRD_PARTY_NOTICES
-            if driver_path.endswith('THIRD_PARTY_NOTICES.chromedriver'):
-                driver_path = driver_path.replace('THIRD_PARTY_NOTICES.chromedriver', 'chromedriver.exe')
-            
-            service = Service(driver_path)
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            
+        logger.info("[OK-SELENIUM] Запуск WebDriver...")
+        self.driver = create_edge_driver(headless=headless)
+        
+        if self.driver:
             logger.info("[OK-SELENIUM] ✓ WebDriver запущен")
             return True
-            
-        except Exception as e:
-            logger.error(f"[OK-SELENIUM] Ошибка инициализации: {e}")
+        else:
+            logger.error("[OK-SELENIUM] Ошибка инициализации WebDriver")
             return False
     
     def _close_driver(self):

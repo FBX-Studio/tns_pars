@@ -233,7 +233,17 @@ class VKCollector:
         
         return all_posts
     
-    def collect(self):
+    def collect(self, collect_comments=False, save_to_db=False):
+        """
+        Сбор постов из VK (с опциональным сбором комментариев)
+        
+        Args:
+            collect_comments: Собирать ли комментарии к постам
+            save_to_db: Сохранять ли напрямую в БД через CommentHelper
+        
+        Returns:
+            Список постов (без комментариев если save_to_db=True, иначе все вместе)
+        """
         all_reviews = []
         
         search_queries = [
@@ -242,18 +252,100 @@ class VKCollector:
             'энергосбыт Нижний Новгород'
         ]
         
-        for query in search_queries:
-            logger.info(f"Searching VK for: {query}")
-            posts = self.search_posts(query, count=self.max_comments)
-            all_reviews.extend(posts)
-            time.sleep(1)
+        # Если нужно сохранять в БД, используем CommentHelper
+        if save_to_db and collect_comments:
+            try:
+                from utils.comment_helper import CommentHelper
+                from models import db
+                
+                saved_count = 0
+                comment_count = 0
+                
+                for query in search_queries:
+                    logger.info(f"[VK] Поиск по запросу: {query}")
+                    posts = self.search_posts(query, count=self.max_comments)
+                    
+                    for post in posts:
+                        comments = []
+                        
+                        # Получаем комментарии
+                        try:
+                            # Парсим owner_id и post_id из source_id
+                            # Формат: vk_post_<owner_id>_<post_id>
+                            parts = post['source_id'].split('_')
+                            if len(parts) >= 4:
+                                owner_id = parts[2]
+                                post_id = parts[3]
+                                
+                                comments = self.get_wall_comments(owner_id, post_id, count=50)
+                                if comments:
+                                    logger.info(f"[VK] Получено {len(comments)} комментариев для поста {post_id}")
+                        except Exception as e:
+                            logger.error(f"[VK] Ошибка получения комментариев: {e}")
+                        
+                        # Сохраняем пост с комментариями
+                        saved_post, saved_comments = CommentHelper.save_post_with_comments(
+                            post, comments, self.sentiment_analyzer
+                        )
+                        
+                        if saved_post:
+                            saved_count += 1
+                            comment_count += len(saved_comments)
+                            all_reviews.append(post)
+                        
+                        time.sleep(0.5)  # Задержка между постами
+                    
+                    time.sleep(1)
+                
+                # Мониторинг групп
+                if Config.VK_GROUP_IDS:
+                    logger.info(f"[VK] Мониторинг групп: {Config.VK_GROUP_IDS}")
+                    group_posts = self.monitor_groups(Config.VK_GROUP_IDS)
+                    
+                    for post in group_posts:
+                        comments = []
+                        
+                        if collect_comments:
+                            try:
+                                parts = post['source_id'].split('_')
+                                if len(parts) >= 4:
+                                    owner_id = parts[2]
+                                    post_id = parts[3]
+                                    comments = self.get_wall_comments(owner_id, post_id, count=50)
+                            except Exception as e:
+                                logger.error(f"[VK] Ошибка получения комментариев: {e}")
+                        
+                        saved_post, saved_comments = CommentHelper.save_post_with_comments(
+                            post, comments, self.sentiment_analyzer
+                        )
+                        
+                        if saved_post:
+                            saved_count += 1
+                            comment_count += len(saved_comments)
+                            all_reviews.append(post)
+                        
+                        time.sleep(0.5)
+                
+                logger.info(f"[VK] ✓ Сохранено постов: {saved_count}, комментариев: {comment_count}")
+                
+            except Exception as e:
+                logger.error(f"[VK] Ошибка при сохранении с комментариями: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            # Обычный режим - просто собираем посты
+            for query in search_queries:
+                logger.info(f"[VK] Поиск: {query}")
+                posts = self.search_posts(query, count=self.max_comments)
+                all_reviews.extend(posts)
+                time.sleep(1)
+            
+            if Config.VK_GROUP_IDS:
+                logger.info(f"[VK] Мониторинг групп: {Config.VK_GROUP_IDS}")
+                group_posts = self.monitor_groups(Config.VK_GROUP_IDS)
+                all_reviews.extend(group_posts)
         
-        if Config.VK_GROUP_IDS:
-            logger.info(f"Monitoring VK groups: {Config.VK_GROUP_IDS}")
-            group_posts = self.monitor_groups(Config.VK_GROUP_IDS)
-            all_reviews.extend(group_posts)
-        
-        logger.info(f"Collected {len(all_reviews)} reviews from VK")
+        logger.info(f"[VK] Собрано постов: {len(all_reviews)}")
         return all_reviews
     
     def _get_author_name(self, item, results):
