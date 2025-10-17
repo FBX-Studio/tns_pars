@@ -330,6 +330,66 @@ class TelegramUserCollector:
         logger.info(f"Total items collected from Telegram: {len(all_messages)}")
         return all_messages
     
-    def collect(self, collect_comments=False):
-        """Synchronous wrapper for async collect"""
-        return asyncio.run(self.search_in_channels(collect_comments=collect_comments))
+    def collect(self, collect_comments=False, save_to_db=False):
+        """
+        Сбор сообщений из Telegram каналов
+        
+        Args:
+            collect_comments: Собирать ли ответы (комментарии)
+            save_to_db: Сохранять ли напрямую в БД через CommentHelper
+        
+        Returns:
+            Список сообщений
+        """
+        logger.info("[TELEGRAM] Запуск сбора...")
+        
+        messages = asyncio.run(self.search_in_channels(collect_comments=collect_comments))
+        
+        # Если нужно сохранять в БД с правильной привязкой комментариев
+        if save_to_db and messages:
+            try:
+                from utils.comment_helper import CommentHelper
+                
+                # Группируем посты и комментарии
+                posts_dict = {}  # {source_id: post_data}
+                comments_dict = {}  # {parent_source_id: [comments]}
+                
+                for msg in messages:
+                    # Проверяем является ли это комментарием (ответом)
+                    if msg.get('is_comment'):
+                        parent_id = msg.get('parent_source_id', msg.get('parent_url', ''))
+                        if parent_id:
+                            if parent_id not in comments_dict:
+                                comments_dict[parent_id] = []
+                            # Убираем временные поля
+                            msg.pop('parent_source_id', None)
+                            msg.pop('parent_url', None)
+                            comments_dict[parent_id].append(msg)
+                    else:
+                        # Это пост
+                        posts_dict[msg['source_id']] = msg
+                
+                # Сохраняем посты с комментариями
+                saved_count = 0
+                comment_count = 0
+                
+                for source_id, post_data in posts_dict.items():
+                    comments = comments_dict.get(source_id, [])
+                    
+                    saved_post, saved_comments = CommentHelper.save_post_with_comments(
+                        post_data, comments, None
+                    )
+                    
+                    if saved_post:
+                        saved_count += 1
+                        comment_count += len(saved_comments)
+                
+                logger.info(f"[TELEGRAM] ✓ Сохранено постов: {saved_count}, комментариев: {comment_count}")
+                
+            except Exception as e:
+                logger.error(f"[TELEGRAM] Ошибка при сохранении: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        logger.info(f"[TELEGRAM] Собрано сообщений: {len(messages)}")
+        return messages

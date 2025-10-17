@@ -1,15 +1,12 @@
 """
 Коллектор для Яндекс.Дзен через Selenium (обход капчи)
 """
-from selenium import webdriver
-from selenium.webdriver.edge.service import Service
-from selenium.webdriver.edge.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.microsoft import EdgeChromiumDriverManager
 from datetime import datetime
 from config import Config
+from utils.webdriver_helper import create_edge_driver, hide_webdriver_signature
 import logging
 import time
 import re
@@ -25,36 +22,15 @@ class ZenCollectorSelenium:
         
     def _setup_driver(self):
         """Настройка Edge драйвера"""
-        edge_options = Options()
+        logger.info("[ZEN-SELENIUM] Запуск WebDriver...")
+        self.driver = create_edge_driver(headless=True)
         
-        # Headless режим (без окна браузера)
-        edge_options.add_argument('--headless=new')
-        edge_options.add_argument('--no-sandbox')
-        edge_options.add_argument('--disable-dev-shm-usage')
-        edge_options.add_argument('--disable-gpu')
-        
-        # Имитация реального браузера
-        edge_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0')
-        edge_options.add_argument('--window-size=1920,1080')
-        edge_options.add_argument('--disable-blink-features=AutomationControlled')
-        edge_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        edge_options.add_experimental_option('useAutomationExtension', False)
-        
-        # Отключение логов
-        edge_options.add_argument('--log-level=3')
-        edge_options.add_experimental_option('excludeSwitches', ['enable-logging'])
-        
-        try:
-            service = Service(EdgeChromiumDriverManager().install())
-            self.driver = webdriver.Edge(service=service, options=edge_options)
-            
-            # Скрываем WebDriver
-            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            
-            logger.info("[ZEN-SELENIUM] Edge драйвер запущен")
+        if self.driver:
+            hide_webdriver_signature(self.driver)
+            logger.info("[ZEN-SELENIUM] ✓ Edge драйвер запущен")
             return True
-        except Exception as e:
-            logger.error(f"[ZEN-SELENIUM] Ошибка запуска драйвера: {e}")
+        else:
+            logger.error("[ZEN-SELENIUM] Ошибка запуска драйвера")
             return False
     
     def _close_driver(self):

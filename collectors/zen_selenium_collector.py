@@ -1,16 +1,13 @@
 """
 Коллектор для Яндекс.Дзен через Selenium (обход капчи)
 """
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
 from datetime import datetime
 from config import Config
+from utils.webdriver_helper import create_edge_driver, hide_webdriver_signature
 import logging
 import time
 import random
@@ -28,57 +25,15 @@ class ZenSeleniumCollector:
         
     def _init_driver(self, headless=True):
         """Инициализация Selenium WebDriver"""
-        try:
-            chrome_options = Options()
-            
-            if headless:
-                chrome_options.add_argument('--headless=new')
-            
-            # Настройки для обхода определения автоматизации
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-blink-features=AutomationControlled')
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
-            
-            # User-Agent реального браузера
-            chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
-            
-            # Размер окна
-            chrome_options.add_argument('--window-size=1920,1080')
-            
-            # Отключение загрузки изображений для скорости
-            prefs = {
-                'profile.managed_default_content_settings.images': 2,
-                'disk-cache-size': 4096
-            }
-            chrome_options.add_experimental_option('prefs', prefs)
-            
-            logger.info("[SELENIUM] Запуск Chrome WebDriver...")
-            
-            # Получаем путь к ChromeDriver
-            driver_path = ChromeDriverManager().install()
-            # Исправляем путь если он указывает на THIRD_PARTY_NOTICES
-            if driver_path.endswith('THIRD_PARTY_NOTICES.chromedriver'):
-                driver_path = driver_path.replace('THIRD_PARTY_NOTICES.chromedriver', 'chromedriver.exe')
-            
-            service = Service(driver_path)
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            
-            # Скрываем признаки WebDriver
-            self.driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-                'source': '''
-                    Object.defineProperty(navigator, 'webdriver', {
-                        get: () => undefined
-                    });
-                '''
-            })
-            
+        logger.info("[SELENIUM] Запуск WebDriver...")
+        self.driver = create_edge_driver(headless=headless)
+        
+        if self.driver:
+            hide_webdriver_signature(self.driver)
             logger.info("[SELENIUM] ✓ WebDriver запущен")
             return True
-            
-        except Exception as e:
-            logger.error(f"[SELENIUM] Ошибка инициализации WebDriver: {e}")
+        else:
+            logger.error("[SELENIUM] Ошибка инициализации WebDriver")
             return False
     
     def _close_driver(self):
