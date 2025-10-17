@@ -153,6 +153,10 @@ class VKCollector:
             return []
     
     def get_wall_comments(self, owner_id, post_id, count=100):
+        """
+        Собирает ВСЕ комментарии под постом про ТНС
+        Не фильтрует по содержанию - собирает все комментарии, даже не связанные с ТНС
+        """
         if not self.vk:
             return []
         
@@ -168,7 +172,8 @@ class VKCollector:
             result = []
             for comment in comments.get('items', []):
                 text = comment.get('text', '')
-                if text and self._is_relevant_to_company(text) and self._is_nizhny_region(text) and self._is_russian(text):
+                # Собираем ВСЕ комментарии с текстом, независимо от содержания
+                if text and len(text.strip()) > 0:
                     comment_data = {
                         'source_id': f"vk_comment_{owner_id}_{post_id}_{comment['id']}",
                         'author': self._get_comment_author(comment, comments),
@@ -233,7 +238,13 @@ class VKCollector:
         
         return all_posts
     
-    def collect(self):
+    def collect(self, collect_comments=True):
+        """
+        Собирает посты и комментарии из VK
+        
+        Args:
+            collect_comments: если True, собирает комментарии к найденным постам
+        """
         all_reviews = []
         
         search_queries = [
@@ -246,14 +257,68 @@ class VKCollector:
             logger.info(f"Searching VK for: {query}")
             posts = self.search_posts(query, count=self.max_comments)
             all_reviews.extend(posts)
+            
+            # Собираем комментарии к найденным постам
+            if collect_comments and posts:
+                logger.info(f"Collecting comments for {len(posts)} posts...")
+                for post in posts:
+                    try:
+                        # Извлекаем owner_id и post_id из source_id
+                        # Формат: vk_post_{owner_id}_{post_id}
+                        source_id = post.get('source_id', '')
+                        if 'vk_post_' in source_id:
+                            parts = source_id.replace('vk_post_', '').split('_')
+                            if len(parts) >= 2:
+                                owner_id = int(parts[0])
+                                post_id = int(parts[1])
+                                
+                                comments = self.get_wall_comments(owner_id, post_id, count=100)
+                                if comments:
+                                    logger.info(f"Found {len(comments)} comments for post {post_id}")
+                                    # Помечаем комментарии
+                                    for comment in comments:
+                                        comment['is_comment'] = True
+                                        comment['parent_source_id'] = source_id
+                                    all_reviews.extend(comments)
+                                
+                                time.sleep(0.5)  # Пауза между запросами
+                    except Exception as e:
+                        logger.error(f"Error collecting comments for post: {e}")
+                        continue
+            
             time.sleep(1)
         
         if Config.VK_GROUP_IDS:
             logger.info(f"Monitoring VK groups: {Config.VK_GROUP_IDS}")
             group_posts = self.monitor_groups(Config.VK_GROUP_IDS)
             all_reviews.extend(group_posts)
+            
+            # Собираем комментарии к постам из групп
+            if collect_comments and group_posts:
+                logger.info(f"Collecting comments for {len(group_posts)} group posts...")
+                for post in group_posts:
+                    try:
+                        source_id = post.get('source_id', '')
+                        if 'vk_post_' in source_id:
+                            parts = source_id.replace('vk_post_', '').split('_')
+                            if len(parts) >= 2:
+                                owner_id = int(parts[0])
+                                post_id = int(parts[1])
+                                
+                                comments = self.get_wall_comments(owner_id, post_id, count=100)
+                                if comments:
+                                    logger.info(f"Found {len(comments)} comments for group post {post_id}")
+                                    for comment in comments:
+                                        comment['is_comment'] = True
+                                        comment['parent_source_id'] = source_id
+                                    all_reviews.extend(comments)
+                                
+                                time.sleep(0.5)
+                    except Exception as e:
+                        logger.error(f"Error collecting comments for group post: {e}")
+                        continue
         
-        logger.info(f"Collected {len(all_reviews)} reviews from VK")
+        logger.info(f"Collected {len(all_reviews)} reviews from VK (posts + comments)")
         return all_reviews
     
     def _get_author_name(self, item, results):

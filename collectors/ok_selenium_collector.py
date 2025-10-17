@@ -1,13 +1,16 @@
 """
-Коллектор для OK.ru через Selenium (обход ограничений API)
+Selenium коллектор для OK.ru с поддержкой прокси
 """
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timedelta
 from config import Config
 import logging
 import time
@@ -16,204 +19,337 @@ import random
 logger = logging.getLogger(__name__)
 
 class OKSeleniumCollector:
-    """Коллектор постов из OK.ru через Selenium (для обхода ограничений API)"""
+    """Коллектор OK.ru через Selenium (обход всех блокировок)"""
     
     def __init__(self, sentiment_analyzer=None):
-        # Используем hardcoded ключевые слова для избежания проблем с кодировкой
-        self.keywords = ['ТНС энерго НН', 'ТНС энерго', 'энергосбыт', 'ТНС']
-        self.driver = None
+        self.keywords = Config.COMPANY_KEYWORDS
         self.sentiment_analyzer = sentiment_analyzer
+        self.driver = None
+        self.max_retries = 2
         
-    def _init_driver(self, headless=True):
-        """Инициализация Selenium WebDriver"""
+    def _setup_driver(self, use_proxy=None):
+        """Настройка Chrome драйвера"""
         try:
             chrome_options = Options()
             
-            if headless:
-                chrome_options.add_argument('--headless=new')
-            
-            chrome_options.add_argument('--no-sandbox')
-            chrome_options.add_argument('--disable-dev-shm-usage')
+            # Базовые настройки для обхода детекции
             chrome_options.add_argument('--disable-blink-features=AutomationControlled')
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option('useAutomationExtension', False)
             
-            chrome_options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+            # User agent
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
+            
+            # Headless режим (работает быстрее, но можно отключить для отладки)
+            chrome_options.add_argument('--headless=new')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            
+            # Язык
+            chrome_options.add_argument('--lang=ru-RU')
+            
+            # Размер окна
             chrome_options.add_argument('--window-size=1920,1080')
             
-            # Отключение загрузки изображений
-            prefs = {'profile.managed_default_content_settings.images': 2}
-            chrome_options.add_experimental_option('prefs', prefs)
+            # Прокси если указан
+            if use_proxy:
+                logger.info(f"[OK-Selenium] Использую прокси: {use_proxy}")
+                chrome_options.add_argument(f'--proxy-server={use_proxy}')
             
-            logger.info("[OK-SELENIUM] Запуск Chrome WebDriver...")
+            # Отключаем логи
+            chrome_options.add_argument('--log-level=3')
+            chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
             
-            # Получаем путь к ChromeDriver
-            driver_path = ChromeDriverManager().install()
-            # Исправляем путь если он указывает на THIRD_PARTY_NOTICES
-            if driver_path.endswith('THIRD_PARTY_NOTICES.chromedriver'):
-                driver_path = driver_path.replace('THIRD_PARTY_NOTICES.chromedriver', 'chromedriver.exe')
+            # Создаем драйвер
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
             
-            service = Service(driver_path)
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            # Скрываем признаки webdriver
+            driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
             
-            logger.info("[OK-SELENIUM] ✓ WebDriver запущен")
-            return True
+            # Устанавливаем таймаут
+            driver.set_page_load_timeout(30)
+            driver.implicitly_wait(10)
+            
+            logger.info("[OK-Selenium] ✓ Chrome драйвер успешно инициализирован")
+            return driver
             
         except Exception as e:
-            logger.error(f"[OK-SELENIUM] Ошибка инициализации: {e}")
-            return False
-    
-    def _close_driver(self):
-        """Закрытие WebDriver"""
-        if self.driver:
-            try:
-                self.driver.quit()
-                logger.info("[OK-SELENIUM] WebDriver закрыт")
-            except:
-                pass
+            logger.error(f"[OK-Selenium] Ошибка создания драйвера: {e}")
+            return None
     
     def _is_relevant(self, text):
         """Проверка релевантности"""
-        if not text:
+        if not text or len(text) < 10:
             return False
         
         text_lower = text.lower()
         
-        exclude = ['газпром', 'т плюс', 'вакансия']
-        if any(e in text_lower for e in exclude):
+        # Исключения
+        exclude = ['газпром', 'т плюс', 'тнс тула', 'вакансия', 'требуется']
+        if any(ex in text_lower for ex in exclude):
             return False
         
-        return any(k.lower() in text_lower for k in self.keywords)
-    
-    def search_ok(self, query, max_results=20):
-        """Поиск в OK.ru через Selenium"""
-        results = []
+        # Ключевые слова
+        if not self.keywords:
+            return True
         
-        try:
-            search_url = f"https://ok.ru/search?st.query={query}&st.typ=GROUPS"
-            logger.info(f"[OK-SELENIUM] Поиск: {search_url}")
-            
-            self.driver.get(search_url)
-            time.sleep(random.uniform(3, 5))
-            
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
-            
-            # Парсим результаты поиска групп
-            groups = soup.find_all('div', class_='ugrid_i')[:10]
-            
-            logger.info(f"[OK-SELENIUM] Найдено групп: {len(groups)}")
-            
-            for group in groups:
-                try:
-                    link_elem = group.find('a', class_='ucard_lk')
-                    if not link_elem:
-                        continue
-                    
-                    group_url = 'https://ok.ru' + link_elem['href']
-                    
-                    # Переходим в группу и собираем посты
-                    posts = self._get_group_posts(group_url, max_per_group=3)
-                    results.extend(posts)
-                    
-                    if len(results) >= max_results:
-                        break
-                    
-                except Exception as e:
-                    logger.debug(f"[OK-SELENIUM] Ошибка парсинга группы: {e}")
-                    continue
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"[OK-SELENIUM] Ошибка поиска: {e}")
-            return results
+        return any(kw.lower() in text_lower for kw in self.keywords)
     
-    def _get_group_posts(self, group_url, max_per_group=5):
-        """Сбор постов из группы"""
+    def _random_delay(self, min_sec=1, max_sec=3):
+        """Случайная задержка для имитации человека"""
+        time.sleep(random.uniform(min_sec, max_sec))
+    
+    def search_with_selenium(self, query, proxy=None):
+        """Поиск через Selenium"""
         posts = []
+        driver = None
         
         try:
-            logger.info(f"[OK-SELENIUM] Сбор постов из группы: {group_url}")
+            logger.info(f"[OK-Selenium] Запуск поиска: {query}")
             
-            self.driver.get(group_url)
-            time.sleep(random.uniform(2, 4))
+            # Создаем драйвер
+            driver = self._setup_driver(use_proxy=proxy)
+            if not driver:
+                return posts
             
-            # Скроллим вниз для загрузки постов
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
-            time.sleep(1)
+            # Формируем URL поиска
+            search_url = f'https://ok.ru/search?st.query={query}&st.mode=GlobalSearch'
             
-            soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+            logger.info(f"[OK-Selenium] Открываю: {search_url}")
+            driver.get(search_url)
             
-            # Ищем посты
-            post_elements = soup.find_all('div', class_='feed-w')[:max_per_group]
+            # Ждем загрузки
+            self._random_delay(3, 5)
             
-            for post_elem in post_elements:
+            # Проверяем на капчу
+            if 'captcha' in driver.page_source.lower():
+                logger.warning("[OK-Selenium] ⚠ Обнаружена капча! Пробую подождать...")
+                time.sleep(10)  # Ждем если капча автоматическая
+            
+            # Скроллим страницу (имитация человека)
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+            self._random_delay(1, 2)
+            
+            # Получаем HTML
+            html = driver.page_source
+            soup = BeautifulSoup(html, 'html.parser')
+            
+            # Ищем результаты поиска
+            # OK.ru использует разные классы, пробуем все
+            selectors = [
+                'div[class*="feed"]',
+                'div[class*="post"]',
+                'div[class*="topic"]',
+                'div[class*="media"]',
+                'article',
+                'div[data-id]'
+            ]
+            
+            found_elements = []
+            for selector in selectors:
+                elements = soup.select(selector)
+                if elements:
+                    logger.debug(f"[OK-Selenium] Найдено элементов по селектору '{selector}': {len(elements)}")
+                    found_elements.extend(elements)
+            
+            logger.info(f"[OK-Selenium] Всего найдено элементов: {len(found_elements)}")
+            
+            # Парсим элементы
+            for elem in found_elements[:20]:  # Берем первые 20
                 try:
-                    # Текст поста
-                    text_elem = post_elem.find('div', class_='media-text_cnt_tx')
-                    if not text_elem:
+                    # Извлекаем текст
+                    text = elem.get_text(strip=True, separator=' ')
+                    
+                    if not text or len(text) < 30:
                         continue
                     
-                    text = text_elem.get_text(strip=True)
-                    
+                    # Проверяем релевантность
                     if not self._is_relevant(text):
                         continue
                     
-                    # Ссылка на пост
-                    link_elem = post_elem.find('a', class_='media-text_lk')
-                    post_url = 'https://ok.ru' + link_elem['href'] if link_elem else group_url
+                    # Ищем ссылку
+                    link_tag = elem.find('a', href=True)
+                    url = 'https://ok.ru'
+                    if link_tag:
+                        href = link_tag['href']
+                        if href.startswith('http'):
+                            url = href
+                        elif href.startswith('/'):
+                            url = f"https://ok.ru{href}"
                     
-                    # Автор
-                    author_elem = post_elem.find('a', class_='emphased')
-                    author = author_elem.get_text(strip=True) if author_elem else 'OK User'
+                    # Ищем автора
+                    author = 'OK User'
+                    author_elem = elem.find(class_=lambda x: x and ('author' in x.lower() or 'name' in x.lower() or 'user' in x.lower()))
+                    if author_elem:
+                        author = author_elem.get_text(strip=True)
                     
-                    posts.append({
+                    # Создаем пост
+                    post_data = {
                         'source': 'ok',
-                        'source_id': f"ok_selenium_{hash(post_url)}",
-                        'author': author,
-                        'author_id': None,
+                        'source_id': f"ok_sel_{abs(hash(text[:100]))}",
+                        'author': author[:100],
+                        'author_id': f"ok_{abs(hash(author))}",
                         'text': text[:500],
-                        'url': post_url,
+                        'url': url,
                         'published_date': datetime.now(),
-                        'is_comment': False
-                    })
+                        'date': datetime.now()
+                    }
                     
-                    logger.info(f"[OK-SELENIUM] ✓ Пост: {text[:50]}...")
+                    # Анализ тональности
+                    if self.sentiment_analyzer:
+                        sentiment = self.sentiment_analyzer.analyze(text)
+                        post_data['sentiment_score'] = sentiment['sentiment_score']
+                        post_data['sentiment_label'] = sentiment['sentiment_label']
+                    
+                    posts.append(post_data)
+                    logger.info(f"[OK-Selenium] ✓ Найден пост: {text[:80]}...")
                     
                 except Exception as e:
-                    logger.debug(f"[OK-SELENIUM] Ошибка парсинга поста: {e}")
+                    logger.debug(f"[OK-Selenium] Ошибка парсинга элемента: {e}")
                     continue
             
+            # Сохраняем скриншот для отладки
+            try:
+                screenshot_path = 'ok_selenium_screenshot.png'
+                driver.save_screenshot(screenshot_path)
+                logger.info(f"[OK-Selenium] Скриншот сохранен: {screenshot_path}")
+            except:
+                pass
+            
+        except TimeoutException:
+            logger.warning("[OK-Selenium] Таймаут загрузки страницы")
         except Exception as e:
-            logger.error(f"[OK-SELENIUM] Ошибка сбора постов: {e}")
+            logger.error(f"[OK-Selenium] Ошибка: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                    logger.info("[OK-Selenium] Драйвер закрыт")
+                except:
+                    pass
         
         return posts
     
-    def collect(self, collect_comments=False):
+    def get_free_proxies(self):
+        """Получение списка бесплатных прокси"""
+        proxies = []
+        
+        try:
+            import requests
+            
+            logger.info("[OK-Selenium] Получение списка бесплатных прокси...")
+            
+            # Источник 1: geonode.com (самый надежный)
+            try:
+                url = 'https://proxylist.geonode.com/api/proxy-list?limit=10&page=1&sort_by=lastChecked&sort_type=desc&protocols=http,https'
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    for proxy in data.get('data', [])[:5]:
+                        ip = proxy.get('ip')
+                        port = proxy.get('port')
+                        protocol = proxy.get('protocols', ['http'])[0]
+                        if ip and port:
+                            proxy_url = f"{protocol}://{ip}:{port}"
+                            proxies.append(proxy_url)
+                            logger.debug(f"[OK-Selenium] Найден прокси: {proxy_url}")
+            except Exception as e:
+                logger.debug(f"[OK-Selenium] Ошибка получения прокси из geonode: {e}")
+            
+            # Источник 2: free-proxy-list.net
+            if len(proxies) < 3:
+                try:
+                    url = 'https://www.proxy-list.download/api/v1/get?type=http'
+                    response = requests.get(url, timeout=10)
+                    if response.status_code == 200:
+                        proxy_list = response.text.strip().split('\n')
+                        for proxy in proxy_list[:5]:
+                            if proxy:
+                                proxies.append(f"http://{proxy.strip()}")
+                except Exception as e:
+                    logger.debug(f"[OK-Selenium] Ошибка получения прокси из proxy-list.download: {e}")
+            
+            logger.info(f"[OK-Selenium] Получено {len(proxies)} прокси")
+            
+        except Exception as e:
+            logger.warning(f"[OK-Selenium] Не удалось получить бесплатные прокси: {e}")
+        
+        return proxies
+    
+    def collect(self):
         """Основной метод сбора"""
         all_posts = []
         
-        logger.info("[OK-SELENIUM] Запуск сбора из OK.ru через Selenium")
-        
-        if not self._init_driver(headless=True):
-            logger.error("[OK-SELENIUM] Не удалось запустить WebDriver")
-            return all_posts
-        
         try:
-            for keyword in self.keywords[:3]:  # Первые 3 ключевых слова
-                logger.info(f"[OK-SELENIUM] Поиск по: {keyword}")
-                
-                posts = self.search_ok(keyword, max_results=10)
-                all_posts.extend(posts)
-                
-                time.sleep(random.uniform(3, 5))
+            logger.info("[OK-Selenium] ================================================")
+            logger.info("[OK-Selenium] ЗАПУСК SELENIUM КОЛЛЕКТОРА ДЛЯ OK.RU")
+            logger.info("[OK-Selenium] ================================================")
             
-            logger.info(f"[OK-SELENIUM] Собрано постов: {len(all_posts)}")
+            # Попытка 1: Без прокси
+            logger.info("[OK-Selenium] Попытка 1: БЕЗ прокси")
+            for keyword in self.keywords[:2]:
+                try:
+                    posts = self.search_with_selenium(keyword)
+                    if posts:
+                        logger.info(f"[OK-Selenium] ✓ Найдено {len(posts)} постов по '{keyword}'")
+                        all_posts.extend(posts)
+                        break  # Если нашли - хватит
+                    time.sleep(3)
+                except Exception as e:
+                    logger.debug(f"[OK-Selenium] Ошибка без прокси: {e}")
+            
+            # Попытка 2: С бесплатными прокси
+            if len(all_posts) == 0:
+                logger.info("[OK-Selenium] Попытка 2: С БЕСПЛАТНЫМИ ПРОКСИ")
+                free_proxies = self.get_free_proxies()
+                
+                if free_proxies:
+                    logger.info(f"[OK-Selenium] Тестирую {len(free_proxies)} прокси...")
+                    
+                    for proxy in free_proxies[:3]:  # Пробуем первые 3
+                        logger.info(f"[OK-Selenium] Пробую прокси: {proxy}")
+                        
+                        for keyword in self.keywords[:1]:  # Только первое ключевое слово
+                            try:
+                                posts = self.search_with_selenium(keyword, proxy=proxy)
+                                if posts:
+                                    logger.info(f"[OK-Selenium] ✓✓✓ УСПЕХ с прокси {proxy}! Найдено {len(posts)} постов")
+                                    all_posts.extend(posts)
+                                    break
+                            except Exception as e:
+                                logger.debug(f"[OK-Selenium] Прокси {proxy} не работает: {e}")
+                                continue
+                        
+                        if len(all_posts) > 0:
+                            break  # Нашли рабочий прокси
+                        
+                        time.sleep(2)
+                else:
+                    logger.warning("[OK-Selenium] Не удалось получить бесплатные прокси")
+            
+            # Итоги
+            logger.info("[OK-Selenium] ================================================")
+            if len(all_posts) > 0:
+                logger.info(f"[OK-Selenium] ✓✓✓ УСПЕХ! Собрано {len(all_posts)} постов")
+            else:
+                logger.warning("[OK-Selenium] ПОСТОВ НЕ НАЙДЕНО")
+                logger.warning("[OK-Selenium] Возможные причины:")
+                logger.warning("[OK-Selenium] 1. OK.ru показывает капчу")
+                logger.warning("[OK-Selenium] 2. Все прокси заблокированы")
+                logger.warning("[OK-Selenium] 3. На странице нет постов по вашим ключевым словам")
+                logger.info("[OK-Selenium] Рекомендации:")
+                logger.info("[OK-Selenium] - Настройте Tor: Настройки → Прокси и Tor")
+                logger.info("[OK-Selenium] - Используйте платные прокси")
+                logger.info("[OK-Selenium] - Получите API токен OK.ru")
+            logger.info("[OK-Selenium] ================================================")
             
         except Exception as e:
-            logger.error(f"[OK-SELENIUM] Ошибка сбора: {e}")
-        
-        finally:
-            self._close_driver()
+            logger.error(f"[OK-Selenium] Критическая ошибка: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
         
         return all_posts

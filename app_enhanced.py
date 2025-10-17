@@ -46,6 +46,15 @@ def index():
             db.func.date(Review.collected_date) == today
         ).count()
         
+        # Вчера для расчета изменения
+        yesterday = today - timedelta(days=1)
+        yesterday_count = Review.query.filter(
+            db.func.date(Review.collected_date) == yesterday
+        ).count()
+        
+        # Изменение за 24 часа
+        today_change = today_count - yesterday_count
+        
         week_ago = today - timedelta(days=7)
         week_count = Review.query.filter(
             db.func.date(Review.collected_date) >= week_ago
@@ -54,6 +63,11 @@ def index():
         positive = Review.query.filter(Review.sentiment_label == 'positive').count()
         negative = Review.query.filter(Review.sentiment_label == 'negative').count()
         neutral = Review.query.filter(Review.sentiment_label == 'neutral').count()
+        
+        # Расчет процентов
+        positive_percent = round((positive / total_reviews * 100) if total_reviews > 0 else 0, 1)
+        negative_percent = round((negative / total_reviews * 100) if total_reviews > 0 else 0, 1)
+        neutral_percent = round((neutral / total_reviews * 100) if total_reviews > 0 else 0, 1)
         
         by_source = db.session.query(
             Review.source, 
@@ -71,10 +85,14 @@ def index():
         stats = {
             'total': total_reviews,
             'today': today_count,
+            'today_change': today_change,
             'week': week_count,
             'positive': positive,
             'negative': negative,
             'neutral': neutral,
+            'positive_percent': positive_percent,
+            'negative_percent': negative_percent,
+            'neutral_percent': neutral_percent,
             'by_source': dict(by_source),
             'last_monitoring': last_monitoring,
             'is_running': monitoring_state['is_running']
@@ -155,6 +173,18 @@ def monitoring():
                          logs=logs, 
                          config=Config,
                          is_running=monitoring_state['is_running'])
+
+# ==================== НАСТРОЙКИ ====================
+@app.route('/settings')
+def settings():
+    """Страница настроек"""
+    return render_template('settings.html', config=Config)
+
+# ==================== ПОМОЩЬ ====================
+@app.route('/help')
+def help_page():
+    """Страница с инструкцией"""
+    return render_template('help.html')
 
 # ==================== API ====================
 @app.route('/api/stats')
@@ -344,6 +374,86 @@ def get_filtered_reviews():
         'reviews': [r.to_dict() for r in reviews.items]
     })
 
+@app.route('/api/settings/save', methods=['POST'])
+def save_settings():
+    """Сохранение настроек в .env файл"""
+    try:
+        import os
+        from pathlib import Path
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'message': 'Нет данных для сохранения'}), 400
+        
+        # Путь к .env файлу
+        env_path = Path(__file__).parent / '.env'
+        
+        # Читаем существующий .env
+        env_vars = {}
+        if env_path.exists():
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        env_vars[key.strip()] = value.strip()
+        
+        # Обновляем значения
+        for key, value in data.items():
+            if value:  # Только если значение не пустое
+                env_vars[key] = value
+        
+        # Записываем обратно
+        with open(env_path, 'w', encoding='utf-8') as f:
+            f.write('# Настройки приложения\n')
+            f.write('# Автоматически сгенерировано через веб-интерфейс\n\n')
+            
+            # Группируем по категориям
+            categories = {
+                'Flask': ['FLASK_HOST', 'FLASK_PORT', 'FLASK_DEBUG', 'FLASK_SECRET_KEY'],
+                'Database': ['DATABASE_URL'],
+                'VK': ['VK_ACCESS_TOKEN', 'VK_GROUP_IDS'],
+                'Telegram': ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_API_ID', 'TELEGRAM_API_HASH', 'TELEGRAM_CHANNELS'],
+                'Keywords': ['COMPANY_KEYWORDS', 'GEO_KEYWORDS'],
+                'Proxy': ['USE_TOR', 'TOR_PROXY', 'HTTP_PROXY', 'HTTPS_PROXY', 'SOCKS_PROXY'],
+                'Other': []
+            }
+            
+            written_keys = set()
+            
+            for category, keys in categories.items():
+                if category == 'Other':
+                    continue
+                
+                category_vars = {k: v for k, v in env_vars.items() if k in keys}
+                if category_vars:
+                    f.write(f'# {category}\n')
+                    for key, value in category_vars.items():
+                        f.write(f'{key}={value}\n')
+                        written_keys.add(key)
+                    f.write('\n')
+            
+            # Записываем остальные переменные
+            other_vars = {k: v for k, v in env_vars.items() if k not in written_keys}
+            if other_vars:
+                f.write('# Other\n')
+                for key, value in other_vars.items():
+                    f.write(f'{key}={value}\n')
+        
+        logger.info('Settings saved successfully')
+        
+        return jsonify({
+            'success': True,
+            'message': 'Настройки успешно сохранены'
+        })
+    
+    except Exception as e:
+        logger.error(f"Error saving settings: {e}")
+        return jsonify({
+            'success': False,
+            'message': f'Ошибка: {str(e)}'
+        }), 500
+
 # ==================== WebSocket СОБЫТИЯ ====================
 @socketio.on('connect')
 def handle_connect(auth=None):
@@ -369,8 +479,10 @@ def handle_status_request():
     emit('status', state_copy)
 
 if __name__ == '__main__':
+    # Временно отключаем debug для быстрого запуска
+    # Используем порт 5001 чтобы избежать конфликтов
     socketio.run(app, 
-                host=Config.FLASK_HOST, 
-                port=Config.FLASK_PORT, 
-                debug=Config.FLASK_DEBUG,
+                host='0.0.0.0', 
+                port=5001, 
+                debug=False,
                 allow_unsafe_werkzeug=True)

@@ -410,9 +410,11 @@
         </div>
         <nav class="tns-nav">
             <div class="container">
-                <a href="/" class="active">📊 Dashboard</a>
-                <a href="/reviews">📝 Отзывы</a>
-                <a href="/monitoring">📡 Мониторинг</a>
+                <a href="/" class="active">📊 Главная</a>
+                <a href="/reviews">💬 Отзывы</a>
+                <a href="/monitoring">🔄 Мониторинг</a>
+                <a href="/settings">⚙️ Настройки</a>
+                <a href="/help">❓ Инструкция</a>
             </div>
         </nav>
     </header>
@@ -427,7 +429,7 @@
             <div class="stat-card neutral">
                 <h3>Сегодня</h3>
                 <div class="value">{{ stats.today }}</div>
-                <div class="trend">+0 за 24 часа</div>
+                <div class="trend">{% if stats.today_change > 0 %}+{% endif %}{{ stats.today_change }} за 24 часа</div>
             </div>
             <div class="stat-card">
                 <h3>За неделю</h3>
@@ -437,17 +439,17 @@
             <div class="stat-card positive">
                 <h3>Позитивных</h3>
                 <div class="value">{{ stats.positive }}</div>
-                <div class="trend">0.0%</div>
+                <div class="trend">{{ stats.positive_percent }}%</div>
             </div>
             <div class="stat-card negative">
                 <h3>Негативных</h3>
                 <div class="value">{{ stats.negative }}</div>
-                <div class="trend">0.0%</div>
+                <div class="trend">{{ stats.negative_percent }}%</div>
             </div>
             <div class="stat-card neutral">
                 <h3>Нейтральных</h3>
                 <div class="value">{{ stats.neutral }}</div>
-                <div class="trend">0.0%</div>
+                <div class="trend">{{ stats.neutral_percent }}%</div>
             </div>
         </div>
 

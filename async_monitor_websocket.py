@@ -29,14 +29,16 @@ except ImportError:
     
 try:
     from collectors.ok_selenium_collector import OKSeleniumCollector as OKCollector
-    logger.info("[MONITOR] Используется OK Selenium коллектор (обход ограничений API)")
-except ImportError:
+    logger.info("[MONITOR] ✓ Используется OK Selenium коллектор (ПРИОРИТЕТ)")
+except ImportError as e:
+    logger.warning(f"[MONITOR] Selenium коллектор недоступен: {e}")
     try:
-        from collectors.ok_api_collector import OKAPICollector as OKCollector
-        logger.warning("[MONITOR] Используется OK API коллектор (ограниченный)")
+        from collectors.ok_collector_working import OKCollectorWorking as OKCollector
+        logger.info("[MONITOR] Используется улучшенный OK коллектор (мультиметод)")
     except ImportError:
         try:
             from collectors.ok_collector import OKCollector
+            logger.info("[MONITOR] Используется базовый OK коллектор")
         except ImportError:
             OKCollector = None
             logger.warning("[MONITOR] OK коллектор недоступен")
@@ -55,23 +57,66 @@ class AsyncReviewMonitorWebSocket:
         self.since_date = self._calculate_since_date(period)
         
         # Инициализируем анализатор Dostoevsky
-        try:
-            logger.info("[MONITOR] Инициализация Dostoevsky анализатора...")
-            self.sentiment_analyzer = DostoevskyAnalyzer()
-            logger.info("[MONITOR] ✓ Dostoevsky анализатор загружен")
-        except Exception as e:
-            logger.warning(f"[MONITOR] Не удалось загрузить Dostoevsky: {e}")
-            logger.warning("[MONITOR] Используем стандартный анализатор")
-            self.sentiment_analyzer = SentimentAnalyzer()
+        # ВРЕМЕННО ОТКЛЮЧЕНО: Dostoevsky блокирует первый запрос
+        logger.info("[MONITOR] Используем стандартный анализатор (Dostoevsky отключен)")
+        self.sentiment_analyzer = SentimentAnalyzer()
         
-        # Инициализируем коллекторы с анализатором
-        self.vk_collector = VKCollector(sentiment_analyzer=self.sentiment_analyzer)
-        self.telegram_collector = TelegramCollector()
-        self.news_collector = NewsCollector(sentiment_analyzer=self.sentiment_analyzer)
-        self.zen_collector = ZenCollector() if ZenCollector else None
-        self.ok_collector = OKCollector(sentiment_analyzer=self.sentiment_analyzer) if OKCollector else None
-        self.moderator = Moderator()
+        # try:
+        #     logger.info("[MONITOR] Инициализация Dostoevsky анализатора...")
+        #     self.sentiment_analyzer = DostoevskyAnalyzer()
+        #     logger.info("[MONITOR] ✓ Dostoevsky анализатор загружен")
+        # except Exception as e:
+        #     logger.warning(f"[MONITOR] Не удалось загрузить Dostoevsky: {e}")
+        #     logger.warning("[MONITOR] Используем стандартный анализатор")
+        #     self.sentiment_analyzer = SentimentAnalyzer()
+        
+        # Ленивая инициализация коллекторов (создаются при первом запуске)
+        self.vk_collector = None
+        self.telegram_collector = None
+        self.news_collector = None
+        self.zen_collector = None
+        self.ok_collector = None
+        self.moderator = None
         self.is_running = False
+        
+    def _init_collectors(self):
+        """Инициализация коллекторов при первом запуске"""
+        if self.vk_collector is not None:
+            return  # Уже инициализированы
+        
+        logger.info("[MONITOR] Инициализация коллекторов...")
+        
+        self.vk_collector = VKCollector(sentiment_analyzer=self.sentiment_analyzer)
+        logger.info("[MONITOR] ✓ VK коллектор инициализирован")
+        
+        self.telegram_collector = TelegramCollector()
+        logger.info("[MONITOR] ✓ Telegram коллектор инициализирован")
+        
+        self.news_collector = NewsCollector(sentiment_analyzer=self.sentiment_analyzer)
+        logger.info("[MONITOR] ✓ News коллектор инициализирован")
+        
+        try:
+            self.zen_collector = ZenCollector() if ZenCollector else None
+            if self.zen_collector:
+                logger.info("[MONITOR] ✓ Zen коллектор инициализирован")
+            else:
+                logger.warning("[MONITOR] ✗ Zen коллектор не доступен (класс не найден)")
+        except Exception as e:
+            logger.error(f"[MONITOR] ✗ Ошибка инициализации Zen коллектора: {e}")
+            self.zen_collector = None
+        
+        try:
+            self.ok_collector = OKCollector(sentiment_analyzer=self.sentiment_analyzer) if OKCollector else None
+            if self.ok_collector:
+                logger.info("[MONITOR] ✓ OK коллектор инициализирован")
+            else:
+                logger.warning("[MONITOR] ✗ OK коллектор не доступен (класс не найден)")
+        except Exception as e:
+            logger.error(f"[MONITOR] ✗ Ошибка инициализации OK коллектора: {e}")
+            self.ok_collector = None
+        
+        self.moderator = Moderator()
+        logger.info("[MONITOR] ✓ Все коллекторы инициализированы")
     
     def _calculate_since_date(self, period):
         """Вычисляет дату начала парсинга на основе периода"""
@@ -200,6 +245,9 @@ class AsyncReviewMonitorWebSocket:
             
             with app.app_context():
                 processed_count = 0
+                # Сначала создаем словарь для хранения созданных постов по source_id
+                created_posts = {}
+                
                 for review_data in reviews:
                     processed_count += 1
                     
@@ -220,6 +268,9 @@ class AsyncReviewMonitorWebSocket:
                         
                         if existing:
                             logger.debug(f"[{source_name}] Пропуск дубликата: {review_data['source_id']}")
+                            # Сохраняем существующий пост для связи с комментариями
+                            if not review_data.get('is_comment', False):
+                                created_posts[review_data['source_id']] = existing
                             continue
                         
                         logger.info(f"[{source_name}] Новая запись: {review_data.get('text', '')[:60]}...")
@@ -231,6 +282,21 @@ class AsyncReviewMonitorWebSocket:
                             review_data['text'],
                             sentiment['sentiment_score']
                         )
+                        
+                        # Определяем parent_id если это комментарий
+                        parent_id = None
+                        is_comment = review_data.get('is_comment', False)
+                        
+                        if is_comment and 'parent_source_id' in review_data:
+                            parent_source_id = review_data['parent_source_id']
+                            # Ищем родительский пост в созданных или в БД
+                            if parent_source_id in created_posts:
+                                parent_id = created_posts[parent_source_id].id
+                            else:
+                                parent_post = Review.query.filter_by(source_id=parent_source_id).first()
+                                if parent_post:
+                                    parent_id = parent_post.id
+                                    created_posts[parent_source_id] = parent_post
                         
                         review = Review(
                             source=review_data['source'],
@@ -246,10 +312,18 @@ class AsyncReviewMonitorWebSocket:
                             moderation_status=moderation_status,
                             moderation_reason=moderation_reason,
                             requires_manual_review=requires_manual,
-                            processed=not requires_manual
+                            processed=not requires_manual,
+                            is_comment=is_comment,
+                            parent_id=parent_id
                         )
                         
                         db.session.add(review)
+                        db.session.flush()  # Получаем ID для возможной связи с комментариями
+                        
+                        # Сохраняем созданный пост для связи с комментариями
+                        if not is_comment:
+                            created_posts[review_data['source_id']] = review
+                        
                         reviews_added += 1
                         
                     except Exception as e:
@@ -305,12 +379,24 @@ class AsyncReviewMonitorWebSocket:
         """Асинхронный сбор из всех источников"""
         start_time = datetime.utcnow()
         
+        # Инициализируем коллекторы при первом запуске
+        self._init_collectors()
+        
         # Определяем активные источники
         sources = ['vk', 'telegram', 'news']
         if self.zen_collector:
             sources.append('zen')
+            logger.info("[MONITOR] Zen коллектор активен")
+        else:
+            logger.warning("[MONITOR] Zen коллектор недоступен")
+            
         if self.ok_collector:
             sources.append('ok')
+            logger.info("[MONITOR] OK коллектор активен")
+        else:
+            logger.warning("[MONITOR] OK коллектор недоступен")
+        
+        logger.info(f"[MONITOR] Всего активных источников: {len(sources)} - {sources}")
         
         self.socketio.emit('monitoring_started', {
             'start_time': start_time.isoformat(),
