@@ -29,9 +29,11 @@ def main():
     logger.info("")
     
     # Инициализация
-    collector = ZenSeleniumCollector()
     sentiment_analyzer = SentimentAnalyzer()
     moderator = Moderator()
+    
+    # Создаем коллектор С передачей sentiment_analyzer
+    collector = ZenSeleniumCollector(sentiment_analyzer=sentiment_analyzer)
     
     # Сбор данных
     logger.info("Запуск сбора...")

@@ -141,9 +141,12 @@ class VKCollector:
                 
                 # Анализ тональности
                 if self.sentiment_analyzer:
-                    sentiment = self.sentiment_analyzer.analyze(text)
-                    post['sentiment_score'] = sentiment['sentiment_score']
-                    post['sentiment_label'] = sentiment['sentiment_label']
+                    try:
+                        sentiment = self.sentiment_analyzer.analyze(text)
+                        post['sentiment_score'] = sentiment.get('sentiment_score', 0)
+                        post['sentiment_label'] = sentiment.get('sentiment_label', 'neutral')
+                    except Exception as e:
+                        logger.debug(f"Error analyzing sentiment: {e}")
                 
                 posts.append(post)
             
@@ -186,9 +189,12 @@ class VKCollector:
                     
                     # Анализ тональности
                     if self.sentiment_analyzer:
-                        sentiment = self.sentiment_analyzer.analyze(text)
-                        comment_data['sentiment_score'] = sentiment['sentiment_score']
-                        comment_data['sentiment_label'] = sentiment['sentiment_label']
+                        try:
+                            sentiment = self.sentiment_analyzer.analyze(text)
+                            comment_data['sentiment_score'] = sentiment.get('sentiment_score', 0)
+                            comment_data['sentiment_label'] = sentiment.get('sentiment_label', 'neutral')
+                        except Exception as e:
+                            logger.debug(f"Error analyzing comment sentiment: {e}")
                     
                     result.append(comment_data)
             
@@ -226,9 +232,12 @@ class VKCollector:
                         
                         # Анализ тональности
                         if self.sentiment_analyzer:
-                            sentiment = self.sentiment_analyzer.analyze(text)
-                            post_data['sentiment_score'] = sentiment['sentiment_score']
-                            post_data['sentiment_label'] = sentiment['sentiment_label']
+                            try:
+                                sentiment = self.sentiment_analyzer.analyze(text)
+                                post_data['sentiment_score'] = sentiment.get('sentiment_score', 0)
+                                post_data['sentiment_label'] = sentiment.get('sentiment_label', 'neutral')
+                            except Exception as e:
+                                logger.debug(f"Error analyzing post sentiment: {e}")
                         
                         all_posts.append(post_data)
                 

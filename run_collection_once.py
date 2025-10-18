@@ -71,6 +71,15 @@ def collect_once():
     sentiment_analyzer = SentimentAnalyzer()
     moderator = Moderator()
     
+    # Передаем sentiment_analyzer во все коллекторы
+    vk_collector.sentiment_analyzer = sentiment_analyzer
+    telegram_collector.sentiment_analyzer = sentiment_analyzer
+    news_collector.sentiment_analyzer = sentiment_analyzer
+    if zen_collector:
+        zen_collector.sentiment_analyzer = sentiment_analyzer
+    if ok_collector:
+        ok_collector.sentiment_analyzer = sentiment_analyzer
+    
     all_reviews = []
     
     # 1. VK

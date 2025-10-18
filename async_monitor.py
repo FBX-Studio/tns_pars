@@ -31,6 +31,10 @@ class AsyncReviewMonitor:
         self.news_collector = NewsCollector(sentiment_analyzer=self.sentiment_analyzer)
         self.moderator = Moderator()
         self.is_running = False
+        
+        # Передаем sentiment_analyzer во все коллекторы
+        self.vk_collector.sentiment_analyzer = self.sentiment_analyzer
+        self.telegram_collector.sentiment_analyzer = self.sentiment_analyzer
     
     async def collect_from_source_async(self, source_name, collect_callable):
         """Асинхронный сбор отзывов из одного источника"""

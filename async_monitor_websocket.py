@@ -89,14 +89,14 @@ class AsyncReviewMonitorWebSocket:
         self.vk_collector = VKCollector(sentiment_analyzer=self.sentiment_analyzer)
         logger.info("[MONITOR] ✓ VK коллектор инициализирован")
         
-        self.telegram_collector = TelegramCollector()
+        self.telegram_collector = TelegramCollector(sentiment_analyzer=self.sentiment_analyzer)
         logger.info("[MONITOR] ✓ Telegram коллектор инициализирован")
         
         self.news_collector = NewsCollector(sentiment_analyzer=self.sentiment_analyzer)
         logger.info("[MONITOR] ✓ News коллектор инициализирован")
         
         try:
-            self.zen_collector = ZenCollector() if ZenCollector else None
+            self.zen_collector = ZenCollector(sentiment_analyzer=self.sentiment_analyzer) if ZenCollector else None
             if self.zen_collector:
                 logger.info("[MONITOR] ✓ Zen коллектор инициализирован")
             else:
@@ -414,7 +414,7 @@ class AsyncReviewMonitorWebSocket:
             return _call
 
         tasks = [
-            self.collect_from_source_async('vk', lambda: self.vk_collector.collect()),
+            self.collect_from_source_async('vk', lambda: self.vk_collector.collect(collect_comments=True)),
             self.collect_from_source_async('telegram', call_with_comments(self.telegram_collector)),
             self.collect_from_source_async('news', lambda: self.news_collector.collect_with_comments()),
         ]
@@ -423,7 +423,7 @@ class AsyncReviewMonitorWebSocket:
         if self.zen_collector:
             tasks.append(self.collect_from_source_async('zen', call_with_comments(self.zen_collector)))
         if self.ok_collector:
-            tasks.append(self.collect_from_source_async('ok', call_with_comments(self.ok_collector)))
+            tasks.append(self.collect_from_source_async('ok', lambda: self.ok_collector.collect(collect_comments=True)))
         
         results = await asyncio.gather(*tasks, return_exceptions=True)
         

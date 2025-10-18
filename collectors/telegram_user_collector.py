@@ -14,13 +14,14 @@ logger = logging.getLogger(__name__)
 class TelegramUserCollector:
     """Telegram collector using User API (Telethon) - can read any public channel"""
     
-    def __init__(self):
+    def __init__(self, sentiment_analyzer=None):
         self.api_id = Config.get('TELEGRAM_API_ID', '')
         self.api_hash = Config.get('TELEGRAM_API_HASH', '')
         self.phone = Config.get('TELEGRAM_PHONE', '')
         self.keywords = Config.COMPANY_KEYWORDS
         self.channels = Config.TELEGRAM_CHANNELS
         self.language_detector = LanguageDetector()
+        self.sentiment_analyzer = sentiment_analyzer
         self.client = None
         
         # Session file - используем уникальное имя для избежания блокировки
@@ -265,6 +266,15 @@ class TelegramUserCollector:
                     'is_comment': False
                 }
                 
+                # Анализ тональности если доступен
+                if self.sentiment_analyzer:
+                    try:
+                        sentiment = self.sentiment_analyzer.analyze(text)
+                        msg_data['sentiment_score'] = sentiment.get('sentiment_score', 0)
+                        msg_data['sentiment_label'] = sentiment.get('sentiment_label', 'neutral')
+                    except Exception as e:
+                        logger.debug(f"Error analyzing message sentiment: {e}")
+                
                 messages.append(msg_data)
                 
                 # Collect comments/replies if requested
@@ -277,6 +287,16 @@ class TelegramUserCollector:
                         reply['source_id'] = f"{msg_data['source_id']}_reply_{hash(reply['text'])}"
                         reply['url'] = msg_data['url']
                         reply['is_comment'] = True
+                        
+                        # Анализ тональности для комментария
+                        if self.sentiment_analyzer:
+                            try:
+                                sentiment = self.sentiment_analyzer.analyze(reply['text'])
+                                reply['sentiment_score'] = sentiment.get('sentiment_score', 0)
+                                reply['sentiment_label'] = sentiment.get('sentiment_label', 'neutral')
+                            except Exception as e:
+                                logger.debug(f"Error analyzing reply sentiment: {e}")
+                        
                         messages.append(reply)
                     
                     if replies:

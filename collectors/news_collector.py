@@ -182,9 +182,12 @@ class NewsCollector:
                     
                     # Анализ тональности
                     if self.sentiment_analyzer:
-                        sentiment = self.sentiment_analyzer.analyze(article['text'])
-                        article['sentiment_score'] = sentiment['sentiment_score']
-                        article['sentiment_label'] = sentiment['sentiment_label']
+                        try:
+                            sentiment = self.sentiment_analyzer.analyze(article['text'])
+                            article['sentiment_score'] = sentiment.get('sentiment_score', 0)
+                            article['sentiment_label'] = sentiment.get('sentiment_label', 'neutral')
+                        except Exception as e:
+                            logger.debug(f"Error analyzing article sentiment: {e}")
                     
                     articles.append(article)
                     logger.debug(f"Found relevant article: {title[:50]}...")
@@ -247,9 +250,12 @@ class NewsCollector:
                     
                     # Анализ тональности
                     if self.sentiment_analyzer:
-                        sentiment = self.sentiment_analyzer.analyze(article['text'])
-                        article['sentiment_score'] = sentiment['sentiment_score']
-                        article['sentiment_label'] = sentiment['sentiment_label']
+                        try:
+                            sentiment = self.sentiment_analyzer.analyze(article['text'])
+                            article['sentiment_score'] = sentiment.get('sentiment_score', 0)
+                            article['sentiment_label'] = sentiment.get('sentiment_label', 'neutral')
+                        except Exception as e:
+                            logger.debug(f"Error analyzing article sentiment: {e}")
                     
                     articles.append(article)
                     logger.debug(f"Found relevant NewsNN article: {title[:50]}...")
@@ -395,9 +401,12 @@ class NewsCollector:
                     
                     # Анализ тональности для комментария
                     if self.sentiment_analyzer:
-                        sentiment = self.sentiment_analyzer.analyze(comment['text'])
-                        comment['sentiment_score'] = sentiment['sentiment_score']
-                        comment['sentiment_label'] = sentiment['sentiment_label']
+                        try:
+                            sentiment = self.sentiment_analyzer.analyze(comment['text'])
+                            comment['sentiment_score'] = sentiment.get('sentiment_score', 0)
+                            comment['sentiment_label'] = sentiment.get('sentiment_label', 'neutral')
+                        except Exception as e:
+                            logger.debug(f"Error analyzing comment sentiment: {e}")
                 
                 all_data.extend(comments)
         

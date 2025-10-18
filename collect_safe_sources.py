@@ -33,13 +33,16 @@ def main():
     os.environ['USE_FREE_PROXIES'] = 'False'
     
     # Инициализация
-    vk_collector = VKCollector()
-    news_collector = NewsCollector()
-    news_collector.use_free_proxies = False
-    news_collector.current_proxy = None
-    
     sentiment_analyzer = SentimentAnalyzer()
     moderator = Moderator()
+    
+    # Создаем коллекторы С sentiment_analyzer
+    vk_collector = VKCollector()
+    vk_collector.sentiment_analyzer = sentiment_analyzer
+    
+    news_collector = NewsCollector(sentiment_analyzer=sentiment_analyzer)
+    news_collector.use_free_proxies = False
+    news_collector.current_proxy = None
     
     all_reviews = []
     

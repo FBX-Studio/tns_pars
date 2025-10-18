@@ -34,74 +34,86 @@ monitoring_state = {
 with app.app_context():
     db.create_all()
 
+# ==================== ТЕСТОВЫЙ РОУТ ====================
+@app.route('/ping')
+def ping():
+    """Простой тест работоспособности"""
+    return jsonify({"status": "ok", "message": "Server is working"})
+
 # ==================== ГЛАВНАЯ СТРАНИЦА ====================
 @app.route('/')
 def index():
     """Современный Dashboard"""
-    with app.app_context():
-        total_reviews = Review.query.count()
-        
-        today = datetime.utcnow().date()
-        today_count = Review.query.filter(
-            db.func.date(Review.collected_date) == today
-        ).count()
-        
-        # Вчера для расчета изменения
-        yesterday = today - timedelta(days=1)
-        yesterday_count = Review.query.filter(
-            db.func.date(Review.collected_date) == yesterday
-        ).count()
-        
-        # Изменение за 24 часа
-        today_change = today_count - yesterday_count
-        
-        week_ago = today - timedelta(days=7)
-        week_count = Review.query.filter(
-            db.func.date(Review.collected_date) >= week_ago
-        ).count()
-        
-        positive = Review.query.filter(Review.sentiment_label == 'positive').count()
-        negative = Review.query.filter(Review.sentiment_label == 'negative').count()
-        neutral = Review.query.filter(Review.sentiment_label == 'neutral').count()
-        
-        # Расчет процентов
-        positive_percent = round((positive / total_reviews * 100) if total_reviews > 0 else 0, 1)
-        negative_percent = round((negative / total_reviews * 100) if total_reviews > 0 else 0, 1)
-        neutral_percent = round((neutral / total_reviews * 100) if total_reviews > 0 else 0, 1)
-        
-        by_source = db.session.query(
-            Review.source, 
-            db.func.count(Review.id)
-        ).group_by(Review.source).all()
-        
-        recent_reviews = Review.query.order_by(
-            Review.collected_date.desc()
-        ).limit(10).all()
-        
-        last_monitoring = MonitoringLog.query.order_by(
-            MonitoringLog.started_at.desc()
-        ).first()
-        
-        stats = {
-            'total': total_reviews,
-            'today': today_count,
-            'today_change': today_change,
-            'week': week_count,
-            'positive': positive,
-            'negative': negative,
-            'neutral': neutral,
-            'positive_percent': positive_percent,
-            'negative_percent': negative_percent,
-            'neutral_percent': neutral_percent,
-            'by_source': dict(by_source),
-            'last_monitoring': last_monitoring,
-            'is_running': monitoring_state['is_running']
-        }
-        
-        return render_template('dashboard_enhanced.html', 
-                             stats=stats, 
-                             reviews=recent_reviews,
-                             config=Config)
+    try:
+        with app.app_context():
+            total_reviews = Review.query.count()
+            
+            today = datetime.utcnow().date()
+            today_count = Review.query.filter(
+                db.func.date(Review.collected_date) == today
+            ).count()
+            
+            # Вчера для расчета изменения
+            yesterday = today - timedelta(days=1)
+            yesterday_count = Review.query.filter(
+                db.func.date(Review.collected_date) == yesterday
+            ).count()
+            
+            # Изменение за 24 часа
+            today_change = today_count - yesterday_count
+            
+            week_ago = today - timedelta(days=7)
+            week_count = Review.query.filter(
+                db.func.date(Review.collected_date) >= week_ago
+            ).count()
+            
+            positive = Review.query.filter(Review.sentiment_label == 'positive').count()
+            negative = Review.query.filter(Review.sentiment_label == 'negative').count()
+            neutral = Review.query.filter(Review.sentiment_label == 'neutral').count()
+            
+            # Расчет процентов
+            positive_percent = round((positive / total_reviews * 100) if total_reviews > 0 else 0, 1)
+            negative_percent = round((negative / total_reviews * 100) if total_reviews > 0 else 0, 1)
+            neutral_percent = round((neutral / total_reviews * 100) if total_reviews > 0 else 0, 1)
+            
+            by_source = db.session.query(
+                Review.source, 
+                db.func.count(Review.id)
+            ).group_by(Review.source).all()
+            
+            recent_reviews = Review.query.order_by(
+                Review.collected_date.desc()
+            ).limit(10).all()
+            
+            last_monitoring = MonitoringLog.query.order_by(
+                MonitoringLog.started_at.desc()
+            ).first()
+            
+            stats = {
+                'total': total_reviews,
+                'today': today_count,
+                'today_change': today_change,
+                'week': week_count,
+                'positive': positive,
+                'negative': negative,
+                'neutral': neutral,
+                'positive_percent': positive_percent,
+                'negative_percent': negative_percent,
+                'neutral_percent': neutral_percent,
+                'by_source': dict(by_source),
+                'last_monitoring': last_monitoring,
+                'is_running': monitoring_state['is_running']
+            }
+            
+            return render_template('dashboard_enhanced.html', 
+                                 stats=stats, 
+                                 reviews=recent_reviews,
+                                 config=Config)
+    except Exception as e:
+        logger.error(f"Dashboard error: {e}")
+        import traceback
+        traceback.print_exc()
+        return f"Error loading dashboard: {e}", 500
 
 # ==================== СТРАНИЦА ОТЗЫВОВ ====================
 @app.route('/reviews')
@@ -596,9 +608,9 @@ def get_comments_stats_api():
 
 if __name__ == '__main__':
     # Временно отключаем debug для быстрого запуска
-    # Используем порт 5001 чтобы избежать конфликтов
+    # Используем порт 5002 чтобы избежать конфликтов
     socketio.run(app, 
                 host='0.0.0.0', 
-                port=5001, 
+                port=5002, 
                 debug=False,
                 allow_unsafe_werkzeug=True)

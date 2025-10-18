@@ -25,11 +25,17 @@ logger = logging.getLogger(__name__)
 
 class ReviewMonitor:
     def __init__(self):
-        self.vk_collector = VKCollector()
-        self.telegram_collector = TelegramCollector()
-        self.news_collector = NewsCollector()
         self.sentiment_analyzer = SentimentAnalyzer()
         self.moderator = Moderator()
+        
+        # Создаем коллекторы С передачей sentiment_analyzer
+        self.vk_collector = VKCollector()
+        self.telegram_collector = TelegramCollector()
+        self.news_collector = NewsCollector(sentiment_analyzer=self.sentiment_analyzer)
+        
+        # Передаем sentiment_analyzer во все коллекторы
+        self.vk_collector.sentiment_analyzer = self.sentiment_analyzer
+        self.telegram_collector.sentiment_analyzer = self.sentiment_analyzer
     
     def collect_from_source(self, source_name, collector):
         """Collect reviews from a single source"""

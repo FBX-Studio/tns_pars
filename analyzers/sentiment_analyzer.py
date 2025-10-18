@@ -299,24 +299,25 @@ class SentimentAnalyzer:
         
         try:
             # Ограничиваем текст до 512 токенов
-            text_truncated = text[:512]
+            text_truncated = text[:2000]  # Увеличил лимит
             
             result = self.model(text_truncated)[0]
             
-            # RuSentiment возвращает: LABEL_0 (negative), LABEL_1 (neutral), LABEL_2 (positive)
-            label_mapping = {
-                'LABEL_0': ('negative', -1.0),
-                'LABEL_1': ('neutral', 0.0),
-                'LABEL_2': ('positive', 1.0),
-                'negative': ('negative', -1.0),
-                'neutral': ('neutral', 0.0),
-                'positive': ('positive', 1.0),
-            }
-            
-            raw_label = result['label']
+            # RuSentiment (rubert-base-cased-sentiment) возвращает: 
+            # neutral, positive, negative (в нижнем регистре)
+            raw_label = result['label'].lower()
             score_value = result['score']  # уверенность от 0 до 1
             
-            sentiment_label, base_score = label_mapping.get(raw_label, ('neutral', 0.0))
+            # Определяем sentiment_label и base_score
+            if raw_label == 'positive':
+                sentiment_label = 'positive'
+                base_score = 1.0
+            elif raw_label == 'negative':
+                sentiment_label = 'negative'
+                base_score = -1.0
+            else:  # neutral или любой другой
+                sentiment_label = 'neutral'
+                base_score = 0.0
             
             # Итоговый score: направление * уверенность
             sentiment_score = base_score * score_value
@@ -330,6 +331,7 @@ class SentimentAnalyzer:
             }
         except Exception as e:
             logger.error(f"Error analyzing sentiment with RuSentiment: {e}")
+            logger.debug(f"Text that caused error: {text[:100]}")
             # Fallback к rule-based
             return self._analyze_simple(text)
     
